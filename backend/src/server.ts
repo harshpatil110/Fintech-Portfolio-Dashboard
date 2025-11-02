@@ -3,12 +3,16 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import { createServer } from 'http';
 import apiRoutes from './routes';
+import WebSocketService from './services/WebSocketService';
+import redisClient from './config/redis';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
+const server = createServer(app);
 const PORT = process.env.PORT || 5000;
 
 // Security middleware
@@ -55,8 +59,69 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-app.listen(PORT, () => {
+// Initialize WebSocket service
+let webSocketService: WebSocketService;
+
+// Initialize services
+async function initializeServices() {
+  try {
+    // Connect to Redis
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+    }
+    
+    // Initialize WebSocket service
+    webSocketService = new WebSocketService(server);
+    
+    console.log('✅ All services initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to initialize services:', error);
+    process.exit(1);
+  }
+}
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  
+  if (webSocketService) {
+    webSocketService.shutdown();
+  }
+  
+  if (redisClient.isOpen) {
+    await redisClient.quit();
+  }
+  
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT received, shutting down gracefully...');
+  
+  if (webSocketService) {
+    webSocketService.shutdown();
+  }
+  
+  if (redisClient.isOpen) {
+    await redisClient.quit();
+  }
+  
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+// Start server
+server.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Fintech Portfolio API ready`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔌 WebSocket endpoint: ws://localhost:${PORT}/ws/market`);
+  
+  // Initialize services after server starts
+  await initializeServices();
 });
