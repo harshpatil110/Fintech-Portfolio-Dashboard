@@ -82,6 +82,16 @@ CREATE TABLE IF NOT EXISTS historical_prices (
     UNIQUE(symbol, date)
 );
 
+-- Password reset tokens table
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON portfolios(user_id);
@@ -93,6 +103,8 @@ CREATE INDEX IF NOT EXISTS idx_watchlists_user_symbol ON watchlists(user_id, sym
 CREATE UNIQUE INDEX IF NOT EXISTS idx_market_data_symbol_unique ON market_data(symbol);
 CREATE INDEX IF NOT EXISTS idx_market_data_timestamp ON market_data(timestamp);
 CREATE INDEX IF NOT EXISTS idx_historical_prices_symbol_date ON historical_prices(symbol, date);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()

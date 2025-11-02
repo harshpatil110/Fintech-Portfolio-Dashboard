@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import apiRoutes from './routes';
 
 // Load environment variables
 dotenv.config();
@@ -37,13 +38,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API routes placeholder
-app.use('/api', (req, res) => {
-  res.status(200).json({ 
-    message: 'Fintech Portfolio API - Routes coming soon',
-    version: '1.0.0'
-  });
-});
+// API routes
+app.use('/api', apiRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
