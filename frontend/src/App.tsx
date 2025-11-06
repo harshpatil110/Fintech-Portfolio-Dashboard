@@ -1,25 +1,113 @@
-import { useState } from 'react'
-import './App.css'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { CssBaseline } from '@mui/material';
+import { AuthProvider } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/routing/ProtectedRoute';
+import { Layout } from './components/layout/Layout';
+import { AuthPage } from './components/auth/AuthPage';
+import { UserProfile } from './components/auth/UserProfile';
+import { Dashboard } from './components/dashboard/Dashboard';
+import { Portfolio } from './components/portfolio/Portfolio';
+import { Watchlist } from './components/watchlist/Watchlist';
+import { Analytics } from './components/analytics/Analytics';
+import StockSelectionExample from './components/examples/StockSelectionExample';
+import './App.css';
+
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#1976d2',
+    },
+    secondary: {
+      main: '#dc004e',
+    },
+  },
+});
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <div className="App">
-      <h1>Fintech Portfolio Dashboard</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Portfolio management system coming soon...
-      </p>
-    </div>
-  )
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <AuthProvider>
+        <Router>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/login" element={<AuthPage />} />
+            <Route path="/register" element={<AuthPage initialMode="register" />} />
+            <Route path="/reset-password" element={<AuthPage initialMode="password-reset" />} />
+            
+            {/* Protected routes */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Dashboard />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/portfolio"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Portfolio />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/watchlist"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Watchlist />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/analytics"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Analytics />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <UserProfile />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/examples/stock-selection"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <StockSelectionExample />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            
+            {/* Default redirect */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            
+            {/* Catch all route - redirect to dashboard */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </ThemeProvider>
+  );
 }
 
-export default App
+export default App;

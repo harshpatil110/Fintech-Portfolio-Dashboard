@@ -3,6 +3,7 @@ import authRoutes from './auth';
 import userRoutes from './users';
 import marketRoutes from './market';
 import portfolioRoutes from './portfolio';
+import watchlistRoutes from './watchlist';
 
 const router = Router();
 
@@ -11,6 +12,7 @@ router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/market', marketRoutes);
 router.use('/portfolio', portfolioRoutes);
+router.use('/watchlist', watchlistRoutes);
 
 // API info endpoint
 router.get('/', (req, res) => {
@@ -48,6 +50,15 @@ router.get('/', (req, res) => {
         addPosition: 'POST /api/portfolio/position',
         updatePosition: 'PUT /api/portfolio/position/:id',
         removePosition: 'DELETE /api/portfolio/position/:id'
+      },
+      watchlist: {
+        getWatchlist: 'GET /api/watchlist/:userId',
+        getWatchlistSummary: 'GET /api/watchlist/:userId/summary',
+        addToWatchlist: 'POST /api/watchlist',
+        bulkAddToWatchlist: 'POST /api/watchlist/bulk',
+        removeFromWatchlist: 'DELETE /api/watchlist/:userId/:symbol',
+        clearWatchlist: 'DELETE /api/watchlist/:userId',
+        updateWatchlistItem: 'PUT /api/watchlist/:userId/:symbol'
       }
     },
     timestamp: new Date()

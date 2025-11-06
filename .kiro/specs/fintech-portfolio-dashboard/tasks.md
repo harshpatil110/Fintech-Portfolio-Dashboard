@@ -73,7 +73,9 @@
   - Implement market status tracking (open/closed/pre-market/after-hours)
   - _Requirements: 1.2, 3.1, 3.2, 3.4, 4.2_
 
-- [ ] 5. Create portfolio management API endpoints
+- [x] 5. Create portfolio management API endpoints
+
+
 
 - [x] 5.1 Implement core portfolio CRUD operations
 
@@ -92,7 +94,9 @@
 -
 
 
-- [-] 5.2 Add portfolio calculation and retrieval logic
+- [x] 5.2 Add portfolio calculation and retrieval logic
+
+
 
 
 
@@ -123,40 +127,76 @@
   - Create portfolio performance metrics calculation
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 6. Build watchlist management functionality
-- [ ] 6.1 Create watchlist API endpoints
+- [x] 6. Build watchlist management functionality
+
+
+- [x] 6.1 Create watchlist API endpoints
+
+
   - Implement POST /api/watchlist endpoint for adding stocks to watchlist
   - Build DELETE /api/watchlist/:userId/:symbol endpoint for removing stocks
   - Create GET /api/watchlist/:userId endpoint for retrieving user's watchlist
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 6.2 Add watchlist validation and limits
+- [x] 6.2 Add watchlist validation and limits
+
+
   - Implement watchlist size limit validation (50 stocks maximum)
   - Add duplicate stock prevention in watchlist
   - Create watchlist sorting and filtering logic
   - _Requirements: 4.5_
 
 - [ ] 7. Develop frontend authentication and routing
-- [ ] 7.1 Create authentication components
+- [x] 7.1 Create authentication components
+
+
+
+
+
+
+
+
+
+
   - Build login and registration components with form validation
   - Implement JWT token storage and management
   - Create password reset and user profile components
   - _Requirements: All requirements require authenticated frontend access_
 
-- [ ] 7.2 Set up protected routing
+
+- [x] 7.2 Set up protected routing
+
+
+
+
+
+
+
+
   - Implement protected route wrapper for authenticated pages
   - Set up React Router for navigation between dashboard sections
   - Create navigation menu and layout components
   - _Requirements: All requirements require authenticated frontend access_
 
 - [ ] 8. Build stock search and selection interface
-- [ ] 8.1 Create stock search component
+- [x] 8.1 Create stock search component
+
+
+
+
+
+
   - Build StockSearch component with autocomplete functionality
   - Implement stock symbol validation and error handling
   - Add debounced search to prevent excessive API calls
   - _Requirements: 1.1, 1.2, 1.5, 4.1_
 
-- [ ] 8.2 Build company information display
+- [x] 8.2 Build company information display
+
+
+
+
+
   - Create company information display with market data
   - Add stock selection interface for portfolio and watchlist
   - Implement stock details modal or sidebar
@@ -164,12 +204,32 @@
 
 - [ ] 9. Implement portfolio dashboard interface
 - [ ] 9.1 Create main dashboard component
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   - Build Dashboard component displaying portfolio overview
   - Create portfolio summary cards showing total value and performance
   - Add portfolio allocation visualization (pie chart or donut chart)
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 9.2 Add real-time portfolio updates
+- [x] 9.2 Add real-time portfolio updates
+
+
+
+
   - Implement real-time portfolio value updates using WebSocket
   - Create individual stock position cards with current prices and gains/losses
   - Add price change animations and visual indicators

@@ -161,14 +161,14 @@ export class PortfolioRepository {
     const query = 'SELECT * FROM stock_positions WHERE portfolio_id = $1 ORDER BY symbol ASC';
     const result = await this.db.query(query, [portfolioId]);
     
-    return result.rows.map(row => this.mapRowToPosition(row));
+    return result.rows.map((row: any) => this.mapRowToPosition(row));
   }
 
   async findPositionsBySymbol(symbol: string): Promise<StockPosition[]> {
     const query = 'SELECT * FROM stock_positions WHERE symbol = $1';
     const result = await this.db.query(query, [symbol.toUpperCase()]);
     
-    return result.rows.map(row => this.mapRowToPosition(row));
+    return result.rows.map((row: any) => this.mapRowToPosition(row));
   }
 
   private groupPortfoliosWithPositions(rows: any[]): Portfolio[] {
