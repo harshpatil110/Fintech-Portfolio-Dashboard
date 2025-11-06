@@ -44,6 +44,7 @@ router.get('/', (req, res) => {
         status: 'GET /api/market/status'
       },
       portfolio: {
+        getPortfolio: 'GET /api/portfolio/:userId',
         addPosition: 'POST /api/portfolio/position',
         updatePosition: 'PUT /api/portfolio/position/:id',
         removePosition: 'DELETE /api/portfolio/position/:id'

@@ -21,6 +21,7 @@ export interface StockPosition {
   marketValue?: number;
   gainLoss?: number;
   gainLossPercent?: number;
+  allocationPercent?: number;
   purchaseDate: Date;
   createdAt: Date;
   updatedAt: Date;

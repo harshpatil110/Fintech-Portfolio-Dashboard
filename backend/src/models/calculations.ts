@@ -134,26 +134,28 @@ export class PortfolioCalculations {
     }
     
     const sortedValues = historicalValues.sort((a, b) => a.date.getTime() - b.date.getTime());
-    const startValue = sortedValues[0].value;
-    const endValue = sortedValues[sortedValues.length - 1].value;
+    const startValue = sortedValues[0]?.value || 0;
+    const endValue = sortedValues[sortedValues.length - 1]?.value || 0;
     const totalReturn = this.roundToDecimal(endValue - startValue, 2);
     const totalReturnPercent = startValue > 0 ? 
       this.roundToDecimal((totalReturn / startValue) * 100, 4) : 0;
     
     // Calculate annualized return for periods longer than 1 day
-    let annualizedReturn: number | undefined;
+    let annualizedReturn: number | undefined = undefined;
     if (timeRange !== '1D' && sortedValues.length > 1) {
-      const daysDiff = Math.abs(
-        (sortedValues[sortedValues.length - 1].date.getTime() - sortedValues[0].date.getTime()) / 
-        (1000 * 60 * 60 * 24)
-      );
+      const firstDate = sortedValues[0]?.date;
+      const lastDate = sortedValues[sortedValues.length - 1]?.date;
       
-      if (daysDiff > 0 && startValue > 0) {
-        const yearsElapsed = daysDiff / 365.25;
-        annualizedReturn = this.roundToDecimal(
-          (Math.pow(endValue / startValue, 1 / yearsElapsed) - 1) * 100, 
-          4
-        );
+      if (firstDate && lastDate) {
+        const daysDiff = Math.abs((lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysDiff > 0 && startValue > 0) {
+          const yearsElapsed = daysDiff / 365.25;
+          annualizedReturn = this.roundToDecimal(
+            (Math.pow(endValue / startValue, 1 / yearsElapsed) - 1) * 100, 
+            4
+          );
+        }
       }
     }
     
@@ -162,7 +164,7 @@ export class PortfolioCalculations {
       endValue: this.roundToDecimal(endValue, 2),
       totalReturn,
       totalReturnPercent,
-      annualizedReturn
+      ...(annualizedReturn !== undefined && { annualizedReturn })
     };
   }
 

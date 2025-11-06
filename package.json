@@ -33,5 +33,8 @@
     "postgresql"
   ],
   "author": "Your Name",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "typescript": "^5.9.3"
+  }
 }

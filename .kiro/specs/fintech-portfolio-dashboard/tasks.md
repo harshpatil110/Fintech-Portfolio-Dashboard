@@ -74,7 +74,13 @@
   - _Requirements: 1.2, 3.1, 3.2, 3.4, 4.2_
 
 - [ ] 5. Create portfolio management API endpoints
-- [ ] 5.1 Implement core portfolio CRUD operations
+
+- [x] 5.1 Implement core portfolio CRUD operations
+
+
+
+
+
 
 
 
@@ -86,7 +92,31 @@
 -
 
 
-- [ ] 5.2 Add portfolio calculation and retrieval logic
+- [-] 5.2 Add portfolio calculation and retrieval logic
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   - Implement GET /api/portfolio/:userId endpoint for retrieving complete portfolio
   - Add portfolio value calculation logic using current market prices
