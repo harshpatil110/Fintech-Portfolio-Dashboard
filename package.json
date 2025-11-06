@@ -35,6 +35,8 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@mui/x-date-pickers": "^8.17.0",
+    "date-fns": "^4.1.0",
     "typescript": "^5.9.3"
   }
 }
