@@ -250,7 +250,10 @@
   - Create position removal functionality with confirmation dialog
   - _Requirements: 1.1, 1.3, 1.4, 5.1, 5.2, 5.3_
 
-- [ ] 10.2 Add advanced portfolio features
+- [x] 10.2 Add advanced portfolio features
+
+
+
 
 
 
@@ -266,9 +269,15 @@
 -
 
 
-- [ ] 11. Develop watchlist interface
+- [x] 11. Develop watchlist interface
 
-- [ ] 11.1 Create watchlist component
+
+
+
+
+- [x] 11.1 Create watchlist component
+
+
 
   - Build Watchlist component displaying monitored stocks
 
@@ -278,7 +287,9 @@
   - Add quick "Add to Portfolio" action from watchlist
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 11.2 Add watchlist features and real-time updates
+- [x] 11.2 Add watchlist features and real-time updates
+
+
 
   - Build live price updates for watchlist stocks
   - Implement watchlist sorting and filtering options

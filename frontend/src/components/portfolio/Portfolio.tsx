@@ -25,7 +25,6 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   History as HistoryIcon,
-  SelectAll as SelectAllIcon,
   Settings as SettingsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
@@ -41,7 +40,8 @@ import { PortfolioFiltersComponent } from './PortfolioFilters';
 
 export const Portfolio: React.FC = () => {
   const { user } = useAuth();
-  const { portfolio, loading, error, refetch } = usePortfolio(user?.id || '');
+  const { data: portfolioData, isLoading: loading, error, refetch } = usePortfolio(user?.id || '');
+  const portfolio = portfolioData?.data?.portfolio;
   
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -182,7 +182,7 @@ export const Portfolio: React.FC = () => {
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
+          {error.message || 'An error occurred while loading your portfolio'}
         </Alert>
       )}
 
@@ -198,7 +198,7 @@ export const Portfolio: React.FC = () => {
           filters={filters}
           onFiltersChange={setFilters}
           onApplyFilters={applyFilters}
-          availableSymbols={portfolio.positions.map(p => p.symbol)}
+          availableSymbols={portfolio.positions.map((p: StockPosition) => p.symbol)}
         />
       )}
 
@@ -242,7 +242,7 @@ export const Portfolio: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {(filtersLoading ? portfolio?.positions || [] : filteredPositions).map((position) => {
+                {(filtersLoading ? portfolio?.positions || [] : filteredPositions).map((position: StockPosition) => {
                   const costBasis = position.quantity * position.averageCost;
                   const marketValue = position.marketValue || (position.currentPrice ? position.quantity * position.currentPrice : costBasis);
                   const gainLoss = position.gainLoss || (marketValue - costBasis);

@@ -24,6 +24,10 @@ interface AddPositionProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  preselectedStock?: {
+    symbol: string;
+    companyName: string;
+  };
 }
 
 interface FormData {
@@ -43,10 +47,16 @@ interface FormErrors {
 export const AddPosition: React.FC<AddPositionProps> = ({
   open,
   onClose,
-  onSuccess
+  onSuccess,
+  preselectedStock
 }) => {
   const [formData, setFormData] = useState<FormData>({
-    selectedStock: null,
+    selectedStock: preselectedStock ? {
+      symbol: preselectedStock.symbol,
+      companyName: preselectedStock.companyName,
+      exchange: '',
+      type: 'stock'
+    } : null,
     quantity: '',
     averageCost: '',
     purchaseDate: new Date()
@@ -148,7 +158,12 @@ export const AddPosition: React.FC<AddPositionProps> = ({
       
       // Reset form
       setFormData({
-        selectedStock: null,
+        selectedStock: preselectedStock ? {
+          symbol: preselectedStock.symbol,
+          companyName: preselectedStock.companyName,
+          exchange: '',
+          type: 'stock'
+        } : null,
         quantity: '',
         averageCost: '',
         purchaseDate: new Date()
@@ -168,7 +183,12 @@ export const AddPosition: React.FC<AddPositionProps> = ({
   const handleClose = () => {
     if (!isSubmitting) {
       setFormData({
-        selectedStock: null,
+        selectedStock: preselectedStock ? {
+          symbol: preselectedStock.symbol,
+          companyName: preselectedStock.companyName,
+          exchange: '',
+          type: 'stock'
+        } : null,
         quantity: '',
         averageCost: '',
         purchaseDate: new Date()
@@ -208,19 +228,23 @@ export const AddPosition: React.FC<AddPositionProps> = ({
             <Typography variant="subtitle2" gutterBottom>
               Stock Selection *
             </Typography>
-            <StockSearch
-              onStockSelect={handleStockSelect}
-              placeholder="Search for a stock (e.g., AAPL, Apple Inc.)"
-              showValidation
-              disabled={isSubmitting}
-            />
-            {errors.stock && (
-              <Typography variant="caption" color="error" sx={{ mt: 0.5, display: 'block' }}>
-                {errors.stock}
-              </Typography>
-            )}
+            {!preselectedStock ? (
+              <>
+                <StockSearch
+                  onStockSelect={handleStockSelect}
+                  placeholder="Search for a stock (e.g., AAPL, Apple Inc.)"
+                  showValidation
+                  disabled={isSubmitting}
+                />
+                {errors.stock && (
+                  <Typography variant="caption" color="error" sx={{ mt: 0.5, display: 'block' }}>
+                    {errors.stock}
+                  </Typography>
+                )}
+              </>
+            ) : null}
             {formData.selectedStock && (
-              <Box sx={{ mt: 1, p: 1, bgcolor: 'success.light', borderRadius: 1 }}>
+              <Box sx={{ mt: preselectedStock ? 0 : 1, p: 1, bgcolor: 'success.light', borderRadius: 1 }}>
                 <Typography variant="body2" color="success.dark">
                   Selected: {formData.selectedStock.symbol} - {formData.selectedStock.companyName}
                 </Typography>

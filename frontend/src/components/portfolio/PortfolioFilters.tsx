@@ -28,7 +28,7 @@ interface PortfolioFiltersProps {
   filters: PortfolioFilters;
   onFiltersChange: (filters: PortfolioFilters) => void;
   onApplyFilters: () => void;
-  availableSymbols: string[];
+  availableSymbols?: string[];
 }
 
 export const PortfolioFiltersComponent: React.FC<PortfolioFiltersProps> = ({

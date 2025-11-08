@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { AuthTokenManager } from '../utils/auth';
 
 export interface WebSocketMessage {
   type: 'subscribe' | 'unsubscribe' | 'quote' | 'error' | 'heartbeat' | 'market_status';
@@ -31,9 +32,9 @@ export interface UseWebSocketReturn {
 }
 
 export const useWebSocket = (): UseWebSocketReturn => {
-  const { token, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
   const reconnectDelay = 3000;
@@ -45,6 +46,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
   const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
 
   const connect = useCallback(() => {
+    const token = AuthTokenManager.getToken();
     if (!isAuthenticated || !token) {
       setConnectionState('disconnected');
       return;
@@ -103,7 +105,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
       setError('Failed to establish connection');
       setConnectionState('error');
     }
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated]);
 
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -208,7 +210,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
 
   // Connect when authenticated
   useEffect(() => {
-    if (isAuthenticated && token) {
+    if (isAuthenticated) {
       connect();
     } else {
       disconnect();
@@ -217,7 +219,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
     return () => {
       disconnect();
     };
-  }, [isAuthenticated, token, connect, disconnect]);
+  }, [isAuthenticated, connect, disconnect]);
 
   // Cleanup on unmount
   useEffect(() => {
