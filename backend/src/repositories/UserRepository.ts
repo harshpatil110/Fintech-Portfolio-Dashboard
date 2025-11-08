@@ -197,8 +197,8 @@ export class UserRepository {
    * Update user preferences
    */
   async updateUserPreferences(userId: string, updates: UpdateUserPreferencesRequest): Promise<UserPreferences | null> {
-    const fields = [];
-    const values = [];
+    const fields: string[] = [];
+    const values: any[] = [];
     let paramCount = 1;
 
     if (updates.currency !== undefined) {

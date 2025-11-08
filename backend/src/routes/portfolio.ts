@@ -2,11 +2,24 @@ import { Router, Response } from 'express';
 import { body, query } from 'express-validator';
 import { PortfolioRepository } from '../repositories/PortfolioRepository';
 import { authenticateToken, AuthenticatedRequest } from '../utils/auth';
-import { handleValidationErrors } from '../utils/validation';
 import { MarketDataService, createMarketDataService } from '../services/MarketDataService';
 import { PortfolioCalculations } from '../models/calculations';
 import { StockPosition, PortfolioSummary, PortfolioFilters, BulkPositionOperation } from '../models/Portfolio';
 import { PerformanceService, TimeRange } from '../services/PerformanceService';
+import {
+  validateStockSymbol,
+  validateFinancialAmount,
+  validateQuantity,
+  validateDate,
+  validateCompanyName,
+  validateUserId,
+  validateUUID,
+  validateTimeRange,
+  validateBulkOperation,
+  handleValidationErrors,
+  sanitizeInput
+} from '../middleware/validation';
+import { portfolioLimiter, bulkOperationsLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 const portfolioRepository = new PortfolioRepository();
@@ -26,7 +39,9 @@ try {
  * Retrieve complete portfolio with current market data and calculations
  */
 router.get('/:userId',
+  portfolioLimiter,
   authenticateToken,
+  sanitizeInput,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const requestedUserId = req.params.userId;
@@ -190,24 +205,11 @@ router.get('/:userId',
  * Validation rules for creating a stock position
  */
 const validateCreatePosition = [
-  body('symbol')
-    .trim()
-    .isLength({ min: 1, max: 10 })
-    .isAlphanumeric()
-    .withMessage('Symbol must be 1-10 alphanumeric characters'),
-  body('companyName')
-    .trim()
-    .isLength({ min: 1, max: 200 })
-    .withMessage('Company name is required and must be less than 200 characters'),
-  body('quantity')
-    .isFloat({ min: 0.001 })
-    .withMessage('Quantity must be a positive number greater than 0'),
-  body('averageCost')
-    .isFloat({ min: 0.01 })
-    .withMessage('Average cost must be a positive number greater than 0'),
-  body('purchaseDate')
-    .isISO8601()
-    .withMessage('Purchase date must be a valid ISO 8601 date')
+  validateStockSymbol(),
+  validateCompanyName(),
+  validateQuantity(),
+  validateFinancialAmount('averageCost'),
+  validateDate('purchaseDate', false)
 ];
 
 /**
@@ -216,16 +218,44 @@ const validateCreatePosition = [
 const validateUpdatePosition = [
   body('quantity')
     .optional()
-    .isFloat({ min: 0.001 })
-    .withMessage('Quantity must be a positive number greater than 0'),
+    .isFloat({ min: 0.000001, max: 999999999 })
+    .withMessage('Quantity must be between 0.000001 and 999,999,999')
+    .custom((value: number) => {
+      if (value !== undefined) {
+        const decimalPlaces = (value.toString().split('.')[1] || '').length;
+        if (decimalPlaces > 6) {
+          throw new Error('Quantity can have at most 6 decimal places');
+        }
+      }
+      return true;
+    }),
   body('averageCost')
     .optional()
-    .isFloat({ min: 0.01 })
-    .withMessage('Average cost must be a positive number greater than 0'),
+    .isFloat({ min: 0.01, max: 999999999.99 })
+    .withMessage('Average cost must be between 0.01 and 999,999,999.99')
+    .custom((value: number) => {
+      if (value !== undefined) {
+        const decimalPlaces = (value.toString().split('.')[1] || '').length;
+        if (decimalPlaces > 2) {
+          throw new Error('Average cost can have at most 2 decimal places');
+        }
+      }
+      return true;
+    }),
   body('purchaseDate')
     .optional()
     .isISO8601()
     .withMessage('Purchase date must be a valid ISO 8601 date')
+    .custom((value: string) => {
+      if (value) {
+        const date = new Date(value);
+        const now = new Date();
+        if (date > now) {
+          throw new Error('Purchase date cannot be in the future');
+        }
+      }
+      return true;
+    })
 ];
 
 /**
@@ -233,7 +263,9 @@ const validateUpdatePosition = [
  * Add a new stock position to the user's portfolio
  */
 router.post('/position', 
+  portfolioLimiter,
   authenticateToken,
+  sanitizeInput,
   validateCreatePosition,
   handleValidationErrors,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -301,7 +333,9 @@ router.post('/position',
  * Update an existing stock position
  */
 router.put('/position/:id',
+  portfolioLimiter,
   authenticateToken,
+  sanitizeInput,
   validateUpdatePosition,
   handleValidationErrors,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -398,7 +432,9 @@ router.put('/position/:id',
  * Remove a stock position from the portfolio
  */
 router.delete('/position/:id',
+  portfolioLimiter,
   authenticateToken,
+  sanitizeInput,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const positionId = req.params.id;
@@ -518,6 +554,14 @@ router.get('/:userId/history',
 
       // Get transaction history for the first portfolio (default portfolio)
       const portfolio = portfolios[0];
+      if (!portfolio) {
+        res.json({
+          message: 'Transaction history retrieved successfully',
+          data: [],
+          timestamp: new Date()
+        });
+        return;
+      }
       const history = await portfolioRepository.getTransactionHistory(portfolio.id, limit);
 
       res.json({
@@ -563,15 +607,29 @@ router.get('/:userId/positions/filtered',
       }
 
       // Parse filters from query parameters
-      const filters: PortfolioFilters = {
-        symbols: req.query.symbols ? (req.query.symbols as string).split(',') : undefined,
-        minValue: req.query.minValue ? parseFloat(req.query.minValue as string) : undefined,
-        maxValue: req.query.maxValue ? parseFloat(req.query.maxValue as string) : undefined,
-        gainersOnly: req.query.gainersOnly === 'true',
-        losersOnly: req.query.losersOnly === 'true',
-        sortBy: req.query.sortBy as any || 'symbol',
-        sortOrder: req.query.sortOrder as any || 'asc'
-      };
+      const filters: PortfolioFilters = {};
+      
+      if (req.query.symbols) {
+        filters.symbols = (req.query.symbols as string).split(',');
+      }
+      if (req.query.minValue) {
+        filters.minValue = parseFloat(req.query.minValue as string);
+      }
+      if (req.query.maxValue) {
+        filters.maxValue = parseFloat(req.query.maxValue as string);
+      }
+      if (req.query.gainersOnly === 'true') {
+        filters.gainersOnly = true;
+      }
+      if (req.query.losersOnly === 'true') {
+        filters.losersOnly = true;
+      }
+      if (req.query.sortBy) {
+        filters.sortBy = req.query.sortBy as any;
+      }
+      if (req.query.sortOrder) {
+        filters.sortOrder = req.query.sortOrder as any;
+      }
 
       // Get user's portfolios
       const portfolios = await portfolioRepository.findByUserId(requestedUserId);
@@ -587,6 +645,14 @@ router.get('/:userId/positions/filtered',
 
       // Get filtered positions for the first portfolio (default portfolio)
       const portfolio = portfolios[0];
+      if (!portfolio) {
+        res.json({
+          message: 'Filtered positions retrieved successfully',
+          data: [],
+          timestamp: new Date()
+        });
+        return;
+      }
       const positions = await portfolioRepository.findPositionsWithFilters(portfolio.id, filters);
 
       // Apply market data and additional filtering if needed
@@ -651,11 +717,10 @@ router.get('/:userId/positions/filtered',
  * Perform bulk operations on multiple positions
  */
 router.post('/bulk-operations',
+  bulkOperationsLimiter,
   authenticateToken,
-  body('operation').isIn(['delete', 'update']).withMessage('Operation must be either delete or update'),
-  body('positionIds').isArray({ min: 1 }).withMessage('Position IDs array is required'),
-  body('positionIds.*').isUUID().withMessage('Each position ID must be a valid UUID'),
-  body('updateData').optional().isObject().withMessage('Update data must be an object'),
+  sanitizeInput,
+  validateBulkOperation(),
   handleValidationErrors,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
@@ -792,7 +857,17 @@ router.get('/stock/:symbol/performance',
   authenticateToken,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-      const symbol = req.params.symbol.toUpperCase();
+      const symbol = req.params.symbol?.toUpperCase();
+      if (!symbol) {
+        res.status(400).json({
+          error: {
+            code: 'MISSING_SYMBOL',
+            message: 'Symbol parameter is required',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
       const timeRange = (req.query.timeRange as TimeRange) || '1M';
 
       if (!performanceService) {

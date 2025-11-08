@@ -55,7 +55,7 @@ export class MarketDataRepository {
     const query = `SELECT * FROM market_data WHERE symbol IN (${placeholders})`;
     
     const result = await this.db.query(query, upperSymbols);
-    return result.rows.map(row => this.mapRowToMarketDataCache(row));
+    return result.rows.map((row: any) => this.mapRowToMarketDataCache(row));
   }
 
   async getStaleQuotes(maxAgeMinutes: number = 15): Promise<MarketDataCache[]> {
@@ -65,7 +65,7 @@ export class MarketDataRepository {
     `;
     
     const result = await this.db.query(query);
-    return result.rows.map(row => this.mapRowToMarketDataCache(row));
+    return result.rows.map((row: any) => this.mapRowToMarketDataCache(row));
   }
 
   async deleteCachedQuote(symbol: string): Promise<boolean> {
@@ -119,7 +119,7 @@ export class MarketDataRepository {
     query += ' ORDER BY date ASC';
     
     const result = await this.db.query(query, params);
-    return result.rows.map(row => this.mapRowToHistoricalPrice(row));
+    return result.rows.map((row: any) => this.mapRowToHistoricalPrice(row));
   }
 
   async getLatestHistoricalPrice(symbol: string): Promise<HistoricalPrice | null> {
@@ -189,7 +189,7 @@ export class MarketDataRepository {
   async getUniqueSymbols(): Promise<string[]> {
     const query = 'SELECT DISTINCT symbol FROM market_data ORDER BY symbol';
     const result = await this.db.query(query);
-    return result.rows.map(row => row.symbol);
+    return result.rows.map((row: any) => row.symbol);
   }
 
   async cleanupOldData(daysToKeep: number = 30): Promise<{ deletedCache: number; deletedHistorical: number }> {

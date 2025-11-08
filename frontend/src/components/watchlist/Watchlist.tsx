@@ -10,7 +10,9 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  useTheme,
+  useMediaQuery,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
@@ -28,6 +30,8 @@ import { marketService } from '../../services/marketService';
 export const Watchlist: React.FC = () => {
   const { user } = useAuth();
   const { isConnected, quotes, subscribe, unsubscribe, connectionState } = useWebSocket();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -216,17 +220,26 @@ export const Watchlist: React.FC = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box 
+        display="flex" 
+        flexDirection={isMobile ? 'column' : 'row'}
+        justifyContent="space-between" 
+        alignItems={isMobile ? 'flex-start' : 'center'} 
+        mb={isMobile ? 2 : 3}
+        gap={isMobile ? 2 : 0}
+      >
         <Box>
-          <Typography variant="h4" component="h1" gutterBottom>
+          <Typography variant={isMobile ? 'h5' : 'h4'} component="h1" gutterBottom>
             Watchlist
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Monitor stocks you're interested in without owning them
-          </Typography>
+          {!isMobile && (
+            <Typography variant="body2" color="text.secondary">
+              Monitor stocks you're interested in without owning them
+            </Typography>
+          )}
         </Box>
         <Box display="flex" gap={1} flexWrap="wrap">
-          {watchlistItems.length > 0 && (
+          {watchlistItems.length > 0 && !isMobile && (
             <Button
               variant="outlined"
               color="error"
@@ -237,20 +250,23 @@ export const Watchlist: React.FC = () => {
               Clear All
             </Button>
           )}
-          <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={() => setBulkAddDialogOpen(true)}
-            size="small"
-          >
-            Bulk Add
-          </Button>
+          {!isMobile && (
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={() => setBulkAddDialogOpen(true)}
+              size="small"
+            >
+              Bulk Add
+            </Button>
+          )}
           <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => setAddDialogOpen(true)}
+            size={isMobile ? 'medium' : 'medium'}
           >
-            Add Stock
+            {isMobile ? 'Add' : 'Add Stock'}
           </Button>
         </Box>
       </Box>
@@ -269,12 +285,16 @@ export const Watchlist: React.FC = () => {
 
       {watchlistItems.length > 0 && (
         <Box mb={2} display="flex" gap={1} alignItems="center" flexWrap="wrap">
-          <Chip label={`${watchlistItems.length} / 50 stocks`} />
+          <Chip 
+            label={`${watchlistItems.length} / 50 stocks`} 
+            size={isMobile ? 'small' : 'medium'}
+          />
           {watchlistItems.filter((item) => item.alertPrice).length > 0 && (
             <Chip
               label={`${watchlistItems.filter((item) => item.alertPrice).length} alerts`}
               color="primary"
               variant="outlined"
+              size={isMobile ? 'small' : 'medium'}
             />
           )}
           <Chip

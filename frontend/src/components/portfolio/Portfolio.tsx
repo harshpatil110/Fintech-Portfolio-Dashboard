@@ -16,7 +16,12 @@ import {
   CircularProgress,
   Tooltip,
   Checkbox,
-  Toolbar
+  Toolbar,
+  useTheme,
+  useMediaQuery,
+  Card,
+  CardContent,
+  Stack,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -42,6 +47,8 @@ export const Portfolio: React.FC = () => {
   const { user } = useAuth();
   const { data: portfolioData, isLoading: loading, error, refetch } = usePortfolio(user?.id || '');
   const portfolio = portfolioData?.data?.portfolio;
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -156,26 +163,36 @@ export const Portfolio: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', 
+        alignItems: isMobile ? 'flex-start' : 'center', 
+        mb: isMobile ? 2 : 3,
+        gap: isMobile ? 2 : 0,
+      }}>
+        <Typography variant={isMobile ? 'h5' : 'h4'} component="h1">
           Portfolio Management
         </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="outlined"
-            startIcon={<HistoryIcon />}
-            onClick={handleShowHistory}
-            disabled={!user}
-          >
-            History
-          </Button>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          {!isMobile && (
+            <Button
+              variant="outlined"
+              startIcon={<HistoryIcon />}
+              onClick={handleShowHistory}
+              disabled={!user}
+            >
+              History
+            </Button>
+          )}
           <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={handleAddPosition}
             disabled={!user}
+            size={isMobile ? 'medium' : 'medium'}
           >
-            Add Position
+            {isMobile ? 'Add' : 'Add Position'}
           </Button>
         </Box>
       </Box>
@@ -206,21 +223,129 @@ export const Portfolio: React.FC = () => {
         {/* Bulk Operations Toolbar */}
         {selectedPositions.length > 0 && (
           <Toolbar sx={{ bgcolor: 'primary.light', color: 'primary.contrastText' }}>
-            <Typography variant="h6" sx={{ flex: 1 }}>
+            <Typography variant={isMobile ? 'body1' : 'h6'} sx={{ flex: 1 }}>
               {selectedPositions.length} position{selectedPositions.length > 1 ? 's' : ''} selected
             </Typography>
             <Button
               color="inherit"
               startIcon={<SettingsIcon />}
               onClick={handleBulkOperations}
+              size={isMobile ? 'small' : 'medium'}
             >
-              Bulk Operations
+              {isMobile ? 'Bulk' : 'Bulk Operations'}
             </Button>
           </Toolbar>
         )}
 
         {filteredPositions.length > 0 ? (
-          <TableContainer>
+          isMobile ? (
+            // Mobile Card View
+            <Box sx={{ p: 2 }}>
+              <Stack spacing={2}>
+                {(filtersLoading ? portfolio?.positions || [] : filteredPositions).map((position: StockPosition) => {
+                  const costBasis = position.quantity * position.averageCost;
+                  const marketValue = position.marketValue || (position.currentPrice ? position.quantity * position.currentPrice : costBasis);
+                  const gainLoss = position.gainLoss || (marketValue - costBasis);
+                  const gainLossPercent = position.gainLossPercent || ((gainLoss / costBasis) * 100);
+                  const isGain = gainLoss >= 0;
+
+                  return (
+                    <Card key={position.id} variant="outlined">
+                      <CardContent>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                              <Chip label={position.symbol} size="small" color="primary" />
+                              <Checkbox
+                                size="small"
+                                checked={selectedPositions.some(p => p.id === position.id)}
+                                onChange={(e) => handleSelectPosition(position, e.target.checked)}
+                              />
+                            </Box>
+                            <Typography variant="body2" color="text.secondary" noWrap>
+                              {position.companyName}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', gap: 0.5 }}>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleEditPosition(position)}
+                              color="primary"
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleRemovePosition(position)}
+                              color="error"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </Box>
+                        
+                        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">Quantity</Typography>
+                            <Typography variant="body2" fontWeight="medium">
+                              {position.quantity.toLocaleString()}
+                            </Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">Avg Cost</Typography>
+                            <Typography variant="body2" fontWeight="medium">
+                              {formatCurrency(position.averageCost)}
+                            </Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">Current Price</Typography>
+                            <Typography variant="body2" fontWeight="medium">
+                              {position.currentPrice ? formatCurrency(position.currentPrice) : 'N/A'}
+                            </Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">Market Value</Typography>
+                            <Typography variant="body2" fontWeight="medium">
+                              {formatCurrency(marketValue)}
+                            </Typography>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">Gain/Loss</Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              {isGain ? (
+                                <TrendingUpIcon fontSize="small" color="success" />
+                              ) : (
+                                <TrendingDownIcon fontSize="small" color="error" />
+                              )}
+                              <Typography 
+                                variant="body2" 
+                                color={isGain ? 'success.main' : 'error.main'}
+                                fontWeight="medium"
+                              >
+                                {formatCurrency(Math.abs(gainLoss))}
+                              </Typography>
+                            </Box>
+                          </Box>
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">Percentage</Typography>
+                            <Typography 
+                              variant="body2" 
+                              color={isGain ? 'success.main' : 'error.main'}
+                              fontWeight="medium"
+                            >
+                              {formatPercent(gainLossPercent)}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </Stack>
+            </Box>
+          ) : (
+            // Desktop Table View
+            <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
@@ -336,6 +461,7 @@ export const Portfolio: React.FC = () => {
               </TableBody>
             </Table>
           </TableContainer>
+          )
         ) : (
           <Box sx={{ p: 4, textAlign: 'center' }}>
             <Typography variant="h6" color="text.secondary" gutterBottom>

@@ -60,17 +60,18 @@ router.get('/quote/:symbol',
   authenticateToken,
   validateSymbol,
   handleValidationErrors,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const { symbol } = req.params;
       if (!symbol) {
-        return res.status(400).json({
+        res.status(400).json({
           error: {
             code: 'MISSING_SYMBOL',
             message: 'Symbol parameter is required',
             timestamp: new Date()
           }
         });
+        return;
       }
       const upperSymbol = symbol.toUpperCase();
 
@@ -94,19 +95,20 @@ router.get('/quote/:symbol',
         } catch (apiError) {
           // If API fails and we have stale cache, return it with warning
           if (cachedQuote) {
-            return res.json({
+            res.json({
               data: cachedQuote,
               timestamp: new Date(),
               source: 'cache',
               isStale: true,
               warning: 'Using cached data due to API unavailability'
             });
+            return;
           }
           throw apiError;
         }
       }
 
-      return res.json({
+      res.json({
         data: cachedQuote,
         timestamp: new Date(),
         source: isStale ? 'api' : 'cache',
@@ -131,7 +133,7 @@ router.post('/quotes',
   authenticateToken,
   validateSymbols,
   handleValidationErrors,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const { symbols } = req.body;
       const upperSymbols = symbols.map((s: string) => s.toUpperCase());
@@ -197,7 +199,7 @@ router.get('/search',
   authenticateToken,
   validateSearchQuery,
   handleValidationErrors,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const { q: query } = req.query as { q: string };
       
@@ -228,23 +230,24 @@ router.get('/history/:symbol',
   validateSymbol,
   validatePeriod,
   handleValidationErrors,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const { symbol } = req.params;
       if (!symbol) {
-        return res.status(400).json({
+        res.status(400).json({
           error: {
             code: 'MISSING_SYMBOL',
             message: 'Symbol parameter is required',
             timestamp: new Date()
           }
         });
+        return;
       }
       const { period = 'daily' } = req.query as { period?: string };
       
       const historicalData = await marketDataService.getHistoricalData(symbol.toUpperCase(), period);
       
-      return res.json({
+      res.json({
         data: historicalData,
         timestamp: new Date(),
         period: period
@@ -268,22 +271,23 @@ router.get('/validate/:symbol',
   authenticateToken,
   validateSymbol,
   handleValidationErrors,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const { symbol } = req.params;
       if (!symbol) {
-        return res.status(400).json({
+        res.status(400).json({
           error: {
             code: 'MISSING_SYMBOL',
             message: 'Symbol parameter is required',
             timestamp: new Date()
           }
         });
+        return;
       }
       
       const isValid = await marketDataService.validateSymbol(symbol.toUpperCase());
       
-      return res.json({
+      res.json({
         data: {
           symbol: symbol.toUpperCase(),
           isValid: isValid
@@ -307,7 +311,7 @@ router.get('/validate/:symbol',
 // Get market status
 router.get('/status',
   authenticateToken,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       // Try to get cached market status first
       let cachedStatus = await CacheService.getCachedMarketStatus();
@@ -370,7 +374,7 @@ router.get('/status',
 // WebSocket connection info
 router.get('/ws/info',
   authenticateToken,
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       // This would be injected by the WebSocket service if available
       const wsService = (req as any).wsService;

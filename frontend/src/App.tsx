@@ -14,6 +14,7 @@ import { Analytics } from './components/analytics/Analytics';
 import StockSelectionExample from './components/examples/StockSelectionExample';
 import { ErrorBoundary, OfflineIndicator } from './components/common';
 import './App.css';
+import './styles/responsive.css';
 
 const theme = createTheme({
   palette: {
@@ -22,6 +23,49 @@ const theme = createTheme({
     },
     secondary: {
       main: '#dc004e',
+    },
+  },
+  breakpoints: {
+    values: {
+      xs: 0,
+      sm: 600,
+      md: 900,
+      lg: 1200,
+      xl: 1536,
+    },
+  },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          minHeight: '44px', // Touch-friendly minimum size
+          '@media (max-width: 600px)': {
+            minHeight: '48px', // Larger on mobile
+          },
+        },
+      },
+    },
+    MuiIconButton: {
+      styleOverrides: {
+        root: {
+          minWidth: '44px',
+          minHeight: '44px',
+          '@media (max-width: 600px)': {
+            minWidth: '48px',
+            minHeight: '48px',
+          },
+        },
+      },
+    },
+    MuiTableCell: {
+      styleOverrides: {
+        root: {
+          '@media (max-width: 900px)': {
+            padding: '8px',
+            fontSize: '0.875rem',
+          },
+        },
+      },
     },
   },
 });

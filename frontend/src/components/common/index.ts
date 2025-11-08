@@ -6,3 +6,5 @@ export { default as LoadingSpinner } from './LoadingSpinner';
 export { default as SkeletonLoader } from './SkeletonLoader';
 export { default as ErrorDisplay } from './ErrorDisplay';
 export { default as OfflineIndicator } from './OfflineIndicator';
+export { MobileActionSheet } from './MobileActionSheet';
+export type { ActionSheetAction } from './MobileActionSheet';

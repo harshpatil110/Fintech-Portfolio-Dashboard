@@ -5,18 +5,22 @@ import {
   Alert,
   Container,
   Grid,
-  Paper
+  Paper,
+  useTheme,
+  useMediaQuery,
 } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePortfolio } from '../../hooks/usePortfolio';
 import { PortfolioSummaryCards } from './PortfolioSummaryCards';
 import { PortfolioAllocationChart } from './PortfolioAllocationChart';
 import { ErrorDisplay, SkeletonLoader } from '../common';
-import { useRetry } from '../../hooks/useRetry';
 
 export const Dashboard: React.FC = () => {
   const { user, isAuthenticated } = useAuth();
   const { data: portfolioData, isLoading, error, refetch } = usePortfolio(user?.id || null);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
   if (!isAuthenticated || !user) {
     return (
@@ -49,7 +53,7 @@ export const Dashboard: React.FC = () => {
             Portfolio Dashboard
           </Typography>
         </Box>
-        <ErrorDisplay 
+        <ErrorDisplay
           error={error}
           title="Failed to load portfolio"
           onRetry={() => refetch()}
@@ -61,21 +65,28 @@ export const Dashboard: React.FC = () => {
   const { portfolio, summary, performance } = portfolioData?.data || {};
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Container maxWidth="lg" sx={{ mt: isMobile ? 2 : isTablet ? 3 : 4, mb: isMobile ? 2 : isTablet ? 3 : 4 }}>
       {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
+      <Box sx={{ mb: isMobile ? 2 : isTablet ? 3 : 4 }}>
+        <Typography
+          variant={isMobile ? 'h5' : 'h4'}
+          component="h1"
+          gutterBottom
+        >
           Portfolio Dashboard
         </Typography>
-        <Typography variant="body1" color="text.secondary">
+        <Typography
+          variant={isMobile ? 'body2' : 'body1'}
+          color="text.secondary"
+        >
           Welcome back, {user.firstName}! Here's your portfolio overview.
         </Typography>
       </Box>
 
       {/* Portfolio Summary Cards */}
       {performance && (
-        <Box sx={{ mb: 4 }}>
-          <PortfolioSummaryCards 
+        <Box sx={{ mb: isMobile ? 2 : isTablet ? 3 : 4 }}>
+          <PortfolioSummaryCards
             performance={performance}
             isLoading={isLoading}
           />
@@ -83,10 +94,10 @@ export const Dashboard: React.FC = () => {
       )}
 
       {/* Portfolio Content */}
-      <Grid container spacing={3}>
+      <Grid container spacing={isMobile ? 2 : 3}>
         {/* Portfolio Allocation Chart */}
         <Grid item xs={12} lg={8}>
-          <PortfolioAllocationChart 
+          <PortfolioAllocationChart
             positions={portfolio?.positions || []}
             isLoading={isLoading}
           />
@@ -94,13 +105,13 @@ export const Dashboard: React.FC = () => {
 
         {/* Quick Stats */}
         <Grid item xs={12} lg={4}>
-          <Paper sx={{ p: 3, height: 'fit-content' }}>
-            <Typography variant="h6" gutterBottom>
+          <Paper sx={{ p: isMobile ? 2 : 3, height: 'fit-content' }}>
+            <Typography variant={isMobile ? 'subtitle1' : 'h6'} gutterBottom>
               Quick Stats
             </Typography>
-            
+
             {summary && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 1.5 : 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="body2" color="text.secondary">
                     Total Positions:
@@ -112,7 +123,7 @@ export const Dashboard: React.FC = () => {
 
                 {summary.topPerformers.length > 0 && (
                   <>
-                    <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+                    <Typography variant="subtitle2" sx={{ mt: isMobile ? 1 : 2, mb: 1 }}>
                       Top Performer
                     </Typography>
                     <Box sx={{ pl: 1 }}>
@@ -122,8 +133,8 @@ export const Dashboard: React.FC = () => {
                       <Typography variant="caption" color="text.secondary">
                         {summary.topPerformers[0].companyName}
                       </Typography>
-                      <Typography 
-                        variant="body2" 
+                      <Typography
+                        variant="body2"
                         color="success.main"
                         sx={{ fontWeight: 'medium' }}
                       >
@@ -135,7 +146,7 @@ export const Dashboard: React.FC = () => {
 
                 {summary.worstPerformers.length > 0 && (
                   <>
-                    <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+                    <Typography variant="subtitle2" sx={{ mt: isMobile ? 1 : 2, mb: 1 }}>
                       Needs Attention
                     </Typography>
                     <Box sx={{ pl: 1 }}>
@@ -145,8 +156,8 @@ export const Dashboard: React.FC = () => {
                       <Typography variant="caption" color="text.secondary">
                         {summary.worstPerformers[0].companyName}
                       </Typography>
-                      <Typography 
-                        variant="body2" 
+                      <Typography
+                        variant="body2"
                         color="error.main"
                         sx={{ fontWeight: 'medium' }}
                       >
@@ -157,7 +168,7 @@ export const Dashboard: React.FC = () => {
                 )}
 
                 {summary.positionCount === 0 && (
-                  <Box sx={{ textAlign: 'center', py: 3 }}>
+                  <Box sx={{ textAlign: 'center', py: isMobile ? 2 : 3 }}>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                       Your portfolio is empty
                     </Typography>

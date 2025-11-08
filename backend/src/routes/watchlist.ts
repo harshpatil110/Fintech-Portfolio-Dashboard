@@ -2,8 +2,17 @@ import { Router, Response } from 'express';
 import { body } from 'express-validator';
 import { WatchlistRepository } from '../repositories/WatchlistRepository';
 import { authenticateToken, AuthenticatedRequest } from '../utils/auth';
-import { handleValidationErrors } from '../utils/validation';
 import { MarketDataService, createMarketDataService } from '../services/MarketDataService';
+import {
+  validateStockSymbol,
+  validateCompanyName,
+  validateAlertPrice,
+  validateUserId,
+  validateBulkWatchlistAdd,
+  handleValidationErrors,
+  sanitizeInput
+} from '../middleware/validation';
+import { watchlistLimiter, bulkOperationsLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 const watchlistRepository = new WatchlistRepository();
@@ -20,19 +29,9 @@ try {
  * Validation rules for adding a stock to watchlist
  */
 const validateAddToWatchlist = [
-  body('symbol')
-    .trim()
-    .isLength({ min: 1, max: 10 })
-    .isAlphanumeric()
-    .withMessage('Symbol must be 1-10 alphanumeric characters'),
-  body('companyName')
-    .trim()
-    .isLength({ min: 1, max: 200 })
-    .withMessage('Company name is required and must be less than 200 characters'),
-  body('alertPrice')
-    .optional()
-    .isFloat({ min: 0.01 })
-    .withMessage('Alert price must be a positive number greater than 0')
+  validateStockSymbol(),
+  validateCompanyName(),
+  validateAlertPrice()
 ];
 
 /**
@@ -40,7 +39,9 @@ const validateAddToWatchlist = [
  * Retrieve user's complete watchlist with current market data, sorting, and filtering
  */
 router.get('/:userId',
+  watchlistLimiter,
   authenticateToken,
+  sanitizeInput,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const requestedUserId = req.params.userId;
@@ -247,7 +248,9 @@ router.get('/:userId',
  * Add a stock to the user's watchlist
  */
 router.post('/', 
+  watchlistLimiter,
   authenticateToken,
+  sanitizeInput,
   validateAddToWatchlist,
   handleValidationErrors,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -331,7 +334,9 @@ router.post('/',
  * Remove a stock from the user's watchlist
  */
 router.delete('/:userId/:symbol',
+  watchlistLimiter,
   authenticateToken,
+  sanitizeInput,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { userId: requestedUserId, symbol } = req.params;
@@ -579,25 +584,10 @@ router.put('/:userId/:symbol',
  * Add multiple stocks to watchlist in a single request
  */
 router.post('/bulk',
+  bulkOperationsLimiter,
   authenticateToken,
-  [
-    body('stocks')
-      .isArray({ min: 1, max: 10 })
-      .withMessage('Stocks array must contain 1-10 items'),
-    body('stocks.*.symbol')
-      .trim()
-      .isLength({ min: 1, max: 10 })
-      .isAlphanumeric()
-      .withMessage('Each symbol must be 1-10 alphanumeric characters'),
-    body('stocks.*.companyName')
-      .trim()
-      .isLength({ min: 1, max: 200 })
-      .withMessage('Each company name is required and must be less than 200 characters'),
-    body('stocks.*.alertPrice')
-      .optional()
-      .isFloat({ min: 0.01 })
-      .withMessage('Alert price must be a positive number greater than 0')
-  ],
+  sanitizeInput,
+  validateBulkWatchlistAdd(),
   handleValidationErrors,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {

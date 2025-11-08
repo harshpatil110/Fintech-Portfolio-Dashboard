@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Alert, Snackbar } from '@mui/material';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
-import WifiIcon from '@mui/icons-material/Wifi';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useToast } from '../../contexts/ToastContext';
 

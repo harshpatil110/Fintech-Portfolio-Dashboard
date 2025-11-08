@@ -8,6 +8,8 @@ import {
 } from '../utils/validation';
 import { authenticateToken, AuthenticatedRequest } from '../utils/auth';
 import { ApiResponse } from '../models';
+import { sanitizeInput } from '../middleware/validation';
+import { authLimiter, registrationLimiter, passwordResetLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 const authService = new AuthService();
@@ -17,6 +19,8 @@ const authService = new AuthService();
  * Register a new user
  */
 router.post('/register', 
+  registrationLimiter,
+  sanitizeInput,
   validateRegistration,
   handleValidationErrors,
   async (req: Request, res: Response): Promise<void> => {
@@ -64,6 +68,8 @@ router.post('/register',
  * Login user
  */
 router.post('/login',
+  authLimiter,
+  sanitizeInput,
   validateLogin,
   handleValidationErrors,
   async (req: Request, res: Response): Promise<void> => {
@@ -235,6 +241,8 @@ router.post('/validate',
  * Request password reset
  */
 router.post('/forgot-password',
+  passwordResetLimiter,
+  sanitizeInput,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { email } = req.body;
@@ -278,6 +286,8 @@ router.post('/forgot-password',
  * Reset password using token
  */
 router.post('/reset-password',
+  passwordResetLimiter,
+  sanitizeInput,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { token, newPassword } = req.body;

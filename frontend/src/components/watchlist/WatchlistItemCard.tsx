@@ -12,7 +12,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField
+  TextField,
+  useTheme,
+  useMediaQuery,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
@@ -21,6 +23,7 @@ import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import { WatchlistItem } from '../../types/watchlist';
+import { useSwipe } from '../../hooks/useSwipe';
 
 interface WatchlistItemCardProps {
   item: WatchlistItem;
@@ -35,11 +38,23 @@ export const WatchlistItemCard: React.FC<WatchlistItemCardProps> = ({
   onAddToPortfolio,
   onUpdateAlert
 }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const [alertPrice, setAlertPrice] = useState(item.alertPrice?.toString() || '');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const isPositive = (item.changePercent || 0) >= 0;
   const isAlertTriggered = item.alertPrice && item.currentPrice && item.currentPrice <= item.alertPrice;
+
+  // Swipe gesture for mobile delete
+  const { ref: swipeRef } = useSwipe({
+    onSwipeLeft: () => {
+      if (isMobile) {
+        setShowDeleteConfirm(true);
+      }
+    },
+  });
 
   const handleSaveAlert = () => {
     const price = alertPrice ? parseFloat(alertPrice) : undefined;
@@ -47,9 +62,21 @@ export const WatchlistItemCard: React.FC<WatchlistItemCardProps> = ({
     setAlertDialogOpen(false);
   };
 
+  const handleConfirmDelete = () => {
+    onRemove(item.symbol);
+    setShowDeleteConfirm(false);
+  };
+
   return (
     <>
-      <Card sx={{ mb: 2, position: 'relative' }}>
+      <Card 
+        ref={swipeRef as any}
+        sx={{ 
+          mb: 2, 
+          position: 'relative',
+          touchAction: isMobile ? 'pan-y' : 'auto', // Allow vertical scrolling but enable horizontal swipe
+        }}
+      >
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="flex-start">
             <Box flex={1}>
@@ -176,6 +203,22 @@ export const WatchlistItemCard: React.FC<WatchlistItemCardProps> = ({
           )}
           <Button onClick={handleSaveAlert} variant="contained">
             Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Mobile swipe delete confirmation */}
+      <Dialog open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)}>
+        <DialogTitle>Remove from Watchlist?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to remove {item.symbol} from your watchlist?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+          <Button onClick={handleConfirmDelete} color="error" variant="contained">
+            Remove
           </Button>
         </DialogActions>
       </Dialog>
