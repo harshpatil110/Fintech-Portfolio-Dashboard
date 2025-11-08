@@ -10,6 +10,7 @@ import {
   BulkOperationResult
 } from '../types/portfolio';
 import { getAuthHeader } from '../utils/auth';
+import { getErrorMessage } from '../utils/errorMessages';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
@@ -48,11 +49,7 @@ export const portfolioService = {
       return response.data;
     } catch (error) {
       console.error('Failed to get portfolio:', error);
-      if (axios.isAxiosError(error)) {
-        const message = error.response?.data?.error?.message || 'Failed to get portfolio';
-        throw new Error(message);
-      }
-      throw new Error('Failed to get portfolio');
+      throw new Error(getErrorMessage(error));
     }
   },
 
