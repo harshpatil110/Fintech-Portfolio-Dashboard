@@ -3,7 +3,6 @@ import {
   Typography,
   Box,
   Alert,
-  CircularProgress,
   Container,
   Grid,
   Paper
@@ -12,6 +11,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { usePortfolio } from '../../hooks/usePortfolio';
 import { PortfolioSummaryCards } from './PortfolioSummaryCards';
 import { PortfolioAllocationChart } from './PortfolioAllocationChart';
+import { ErrorDisplay, SkeletonLoader } from '../common';
+import { useRetry } from '../../hooks/useRetry';
 
 export const Dashboard: React.FC = () => {
   const { user, isAuthenticated } = useAuth();
@@ -30,14 +31,12 @@ export const Dashboard: React.FC = () => {
   if (isLoading) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
-          <Box sx={{ textAlign: 'center' }}>
-            <CircularProgress size={48} sx={{ mb: 2 }} />
-            <Typography variant="h6" color="text.secondary">
-              Loading your portfolio...
-            </Typography>
-          </Box>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h4" component="h1" gutterBottom>
+            Portfolio Dashboard
+          </Typography>
         </Box>
+        <SkeletonLoader variant="dashboard" />
       </Container>
     );
   }
@@ -45,16 +44,16 @@ export const Dashboard: React.FC = () => {
   if (error) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Alert 
-          severity="error" 
-          action={
-            <button onClick={() => refetch()}>
-              Retry
-            </button>
-          }
-        >
-          Failed to load portfolio data: {error.message}
-        </Alert>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h4" component="h1" gutterBottom>
+            Portfolio Dashboard
+          </Typography>
+        </Box>
+        <ErrorDisplay 
+          error={error}
+          title="Failed to load portfolio"
+          onRetry={() => refetch()}
+        />
       </Container>
     );
   }

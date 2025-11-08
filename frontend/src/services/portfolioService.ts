@@ -63,11 +63,7 @@ export const portfolioService = {
       return response.data.data;
     } catch (error) {
       console.error('Failed to add position:', error);
-      if (axios.isAxiosError(error)) {
-        const message = error.response?.data?.error?.message || 'Failed to add position';
-        throw new Error(message);
-      }
-      throw new Error('Failed to add position');
+      throw new Error(getErrorMessage(error));
     }
   },
 
@@ -81,11 +77,7 @@ export const portfolioService = {
       return response.data.data;
     } catch (error) {
       console.error('Failed to update position:', error);
-      if (axios.isAxiosError(error)) {
-        const message = error.response?.data?.error?.message || 'Failed to update position';
-        throw new Error(message);
-      }
-      throw new Error('Failed to update position');
+      throw new Error(getErrorMessage(error));
     }
   },
 
@@ -94,11 +86,7 @@ export const portfolioService = {
       await portfolioApi.delete(`/position/${positionId}`);
     } catch (error) {
       console.error('Failed to remove position:', error);
-      if (axios.isAxiosError(error)) {
-        const message = error.response?.data?.error?.message || 'Failed to remove position';
-        throw new Error(message);
-      }
-      throw new Error('Failed to remove position');
+      throw new Error(getErrorMessage(error));
     }
   },
 
@@ -113,11 +101,7 @@ export const portfolioService = {
       return response.data.data;
     } catch (error) {
       console.error('Failed to get transaction history:', error);
-      if (axios.isAxiosError(error)) {
-        const message = error.response?.data?.error?.message || 'Failed to get transaction history';
-        throw new Error(message);
-      }
-      throw new Error('Failed to get transaction history');
+      throw new Error(getErrorMessage(error));
     }
   },
 
@@ -140,11 +124,7 @@ export const portfolioService = {
       return response.data.data;
     } catch (error) {
       console.error('Failed to get filtered positions:', error);
-      if (axios.isAxiosError(error)) {
-        const message = error.response?.data?.error?.message || 'Failed to get filtered positions';
-        throw new Error(message);
-      }
-      throw new Error('Failed to get filtered positions');
+      throw new Error(getErrorMessage(error));
     }
   },
 
@@ -158,11 +138,7 @@ export const portfolioService = {
       return response.data.data;
     } catch (error) {
       console.error('Failed to perform bulk operation:', error);
-      if (axios.isAxiosError(error)) {
-        const message = error.response?.data?.error?.message || 'Failed to perform bulk operation';
-        throw new Error(message);
-      }
-      throw new Error('Failed to perform bulk operation');
+      throw new Error(getErrorMessage(error));
     }
   }
 };
