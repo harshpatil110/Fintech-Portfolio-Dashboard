@@ -296,7 +296,9 @@
   - Add watchlist management tools (clear all, bulk actions)
   - _Requirements: 4.5_
 
-- [-] 12. Implement performance analytics and charts
+- [x] 12. Implement performance analytics and charts
+
+
 
 
 - [x] 12.1 Create chart components
@@ -307,7 +309,8 @@
   - Create responsive chart layouts for different screen sizes
   - _Requirements: 6.1, 6.2, 6.3_
 
-- [-] 12.2 Add performance metrics and comparisons
+- [x] 12.2 Add performance metrics and comparisons
+
 
   - Build portfolio performance history tracking
   - Create individual stock performance charts
@@ -315,14 +318,19 @@
   - Calculate and display key metrics (total return, annualized return)
   - _Requirements: 6.4, 6.5_
 
-- [ ] 13. Add comprehensive error handling and loading states
-- [ ] 13.1 Implement frontend error handling
+- [-] 13. Add comprehensive error handling and loading states
+
+
+- [x] 13.1 Implement frontend error handling
+
+
   - Add comprehensive error boundaries in React components
   - Create loading spinners and skeleton screens for better UX
   - Implement retry mechanisms for failed API calls
   - _Requirements: 1.5, 3.4 (error handling aspects)_
 
-- [ ] 13.2 Add user feedback and offline handling
+- [-] 13.2 Add user feedback and offline handling
+
   - Create user-friendly error messages for common scenarios
   - Build offline detection and graceful degradation
   - Add toast notifications for user actions

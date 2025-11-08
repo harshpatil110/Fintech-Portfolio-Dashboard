@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
 import { AuthProvider } from './contexts/AuthContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { ProtectedRoute } from './components/routing/ProtectedRoute';
 import { Layout } from './components/layout/Layout';
 import { AuthPage } from './components/auth/AuthPage';
@@ -11,6 +12,7 @@ import { Portfolio } from './components/portfolio/Portfolio';
 import { Watchlist } from './components/watchlist/Watchlist';
 import { Analytics } from './components/analytics/Analytics';
 import StockSelectionExample from './components/examples/StockSelectionExample';
+import { ErrorBoundary, OfflineIndicator } from './components/common';
 import './App.css';
 
 const theme = createTheme({
@@ -26,11 +28,14 @@ const theme = createTheme({
 
 function App() {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <AuthProvider>
-        <Router>
-          <Routes>
+    <ErrorBoundary>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <ToastProvider>
+          <AuthProvider>
+            <OfflineIndicator />
+            <Router>
+              <Routes>
             {/* Public routes */}
             <Route path="/login" element={<AuthPage />} />
             <Route path="/register" element={<AuthPage initialMode="register" />} />
@@ -103,10 +108,12 @@ function App() {
             
             {/* Catch all route - redirect to dashboard */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </Router>
-      </AuthProvider>
-    </ThemeProvider>
+              </Routes>
+            </Router>
+          </AuthProvider>
+        </ToastProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 
