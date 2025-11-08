@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { 
-  Portfolio, 
   PortfolioResponse,
   CreateStockPositionRequest,
   UpdateStockPositionRequest,

@@ -34,8 +34,7 @@ interface PortfolioFiltersProps {
 export const PortfolioFiltersComponent: React.FC<PortfolioFiltersProps> = ({
   filters,
   onFiltersChange,
-  onApplyFilters,
-  availableSymbols
+  onApplyFilters
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [symbolInput, setSymbolInput] = useState('');

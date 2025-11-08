@@ -6,14 +6,17 @@ import { handleValidationErrors } from '../utils/validation';
 import { MarketDataService, createMarketDataService } from '../services/MarketDataService';
 import { PortfolioCalculations } from '../models/calculations';
 import { StockPosition, PortfolioSummary, PortfolioFilters, BulkPositionOperation } from '../models/Portfolio';
+import { PerformanceService, TimeRange } from '../services/PerformanceService';
 
 const router = Router();
 const portfolioRepository = new PortfolioRepository();
 let marketDataService: MarketDataService;
+let performanceService: PerformanceService;
 
 // Initialize market data service
 try {
   marketDataService = createMarketDataService();
+  performanceService = new PerformanceService(portfolioRepository, marketDataService);
 } catch (error) {
   console.error('Failed to initialize market data service:', error);
 }
@@ -715,6 +718,231 @@ router.post('/bulk-operations',
         error: {
           code: 'INTERNAL_ERROR',
           message: 'Failed to perform bulk operation',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/portfolio/:userId/performance/history
+ * Get portfolio performance history for a given time range
+ */
+router.get('/:userId/performance/history',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const requestedUserId = req.params.userId;
+      const authenticatedUserId = req.user!.userId;
+      const timeRange = (req.query.timeRange as TimeRange) || '1M';
+
+      // Ensure users can only access their own performance data
+      if (requestedUserId !== authenticatedUserId) {
+        res.status(403).json({
+          error: {
+            code: 'UNAUTHORIZED_ACCESS',
+            message: 'You can only access your own performance data',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      if (!performanceService) {
+        res.status(503).json({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Performance service is not available',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      const performanceData = await performanceService.getPortfolioPerformance(
+        requestedUserId,
+        timeRange
+      );
+
+      res.json({
+        message: 'Portfolio performance retrieved successfully',
+        data: performanceData,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error('Error retrieving portfolio performance:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to retrieve portfolio performance',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/portfolio/stock/:symbol/performance
+ * Get individual stock performance history
+ */
+router.get('/stock/:symbol/performance',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const symbol = req.params.symbol.toUpperCase();
+      const timeRange = (req.query.timeRange as TimeRange) || '1M';
+
+      if (!performanceService) {
+        res.status(503).json({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Performance service is not available',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      const performanceData = await performanceService.getStockPerformance(
+        symbol,
+        timeRange
+      );
+
+      res.json({
+        message: 'Stock performance retrieved successfully',
+        data: performanceData,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error('Error retrieving stock performance:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to retrieve stock performance',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/portfolio/:userId/performance/comparison
+ * Get portfolio vs market index comparison
+ */
+router.get('/:userId/performance/comparison',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const requestedUserId = req.params.userId;
+      const authenticatedUserId = req.user!.userId;
+      const timeRange = (req.query.timeRange as TimeRange) || '1M';
+      const indexSymbol = (req.query.indexSymbol as string) || 'SPY';
+
+      // Ensure users can only access their own performance data
+      if (requestedUserId !== authenticatedUserId) {
+        res.status(403).json({
+          error: {
+            code: 'UNAUTHORIZED_ACCESS',
+            message: 'You can only access your own performance data',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      if (!performanceService) {
+        res.status(503).json({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Performance service is not available',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      const comparisonData = await performanceService.getPerformanceComparison(
+        requestedUserId,
+        timeRange,
+        indexSymbol
+      );
+
+      res.json({
+        message: 'Performance comparison retrieved successfully',
+        data: comparisonData,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error('Error retrieving performance comparison:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to retrieve performance comparison',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/portfolio/:userId/performance/metrics
+ * Get detailed performance metrics
+ */
+router.get('/:userId/performance/metrics',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const requestedUserId = req.params.userId;
+      const authenticatedUserId = req.user!.userId;
+      const timeRange = (req.query.timeRange as TimeRange) || '1M';
+
+      // Ensure users can only access their own performance data
+      if (requestedUserId !== authenticatedUserId) {
+        res.status(403).json({
+          error: {
+            code: 'UNAUTHORIZED_ACCESS',
+            message: 'You can only access your own performance data',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      if (!performanceService) {
+        res.status(503).json({
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'Performance service is not available',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      const metricsData = await performanceService.getPerformanceMetrics(
+        requestedUserId,
+        timeRange
+      );
+
+      res.json({
+        message: 'Performance metrics retrieved successfully',
+        data: metricsData,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error('Error retrieving performance metrics:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to retrieve performance metrics',
           timestamp: new Date()
         }
       });

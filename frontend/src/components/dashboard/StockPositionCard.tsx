@@ -6,7 +6,6 @@ import {
   Box,
   Chip,
   IconButton,
-  Tooltip,
   Fade,
   useTheme
 } from '@mui/material';
@@ -14,8 +13,7 @@ import {
   TrendingUp,
   TrendingDown,
   TrendingFlat,
-  MoreVert,
-  ShowChart
+  MoreVert
 } from '@mui/icons-material';
 import { StockPosition } from '../../types/portfolio';
 import { StockQuote } from '../../hooks/useWebSocket';
@@ -31,7 +29,6 @@ interface StockPositionCardProps {
 export const StockPositionCard: React.FC<StockPositionCardProps> = ({
   position,
   quote,
-  isLoading = false,
   onClick,
   onMenuClick
 }) => {

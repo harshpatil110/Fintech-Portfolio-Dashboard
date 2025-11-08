@@ -296,14 +296,19 @@
   - Add watchlist management tools (clear all, bulk actions)
   - _Requirements: 4.5_
 
-- [ ] 12. Implement performance analytics and charts
-- [ ] 12.1 Create chart components
+- [-] 12. Implement performance analytics and charts
+
+
+- [x] 12.1 Create chart components
+
+
   - Build Charts component using Chart.js or Recharts
   - Implement time range selection (1D, 1W, 1M, 3M, 1Y)
   - Create responsive chart layouts for different screen sizes
   - _Requirements: 6.1, 6.2, 6.3_
 
-- [ ] 12.2 Add performance metrics and comparisons
+- [-] 12.2 Add performance metrics and comparisons
+
   - Build portfolio performance history tracking
   - Create individual stock performance charts
   - Add portfolio vs market index comparison functionality
