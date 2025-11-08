@@ -240,7 +240,9 @@
 - [-] 10. Build portfolio management interface
 
 
-- [ ] 10.1 Create position management components
+- [x] 10.1 Create position management components
+
+
 
 
   - Build AddPosition component with form validation
@@ -249,19 +251,35 @@
   - _Requirements: 1.1, 1.3, 1.4, 5.1, 5.2, 5.3_
 
 - [ ] 10.2 Add advanced portfolio features
+
+
+
+
+
+
   - Implement transaction history display
   - Add bulk operations for managing multiple positions
   - Create position sorting and filtering options
   - _Requirements: 5.4, 5.5_
+-
+
+-
+
 
 - [ ] 11. Develop watchlist interface
+
 - [ ] 11.1 Create watchlist component
+
   - Build Watchlist component displaying monitored stocks
-  - Implement add/remove functionality for watchlist items
+
+  - Implement add/remove functionality
+
+ for watchlist items
   - Add quick "Add to Portfolio" action from watchlist
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
 - [ ] 11.2 Add watchlist features and real-time updates
+
   - Build live price updates for watchlist stocks
   - Implement watchlist sorting and filtering options
   - Add watchlist management tools (clear all, bulk actions)

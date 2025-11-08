@@ -92,6 +92,21 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
     UNIQUE(user_id)
 );
 
+-- Transaction history table
+CREATE TABLE IF NOT EXISTS transaction_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE,
+    position_id UUID REFERENCES stock_positions(id) ON DELETE SET NULL,
+    symbol VARCHAR(10) NOT NULL,
+    transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('BUY', 'SELL', 'UPDATE', 'DELETE')),
+    quantity DECIMAL(15, 6),
+    price DECIMAL(15, 2),
+    total_value DECIMAL(15, 2),
+    notes TEXT,
+    transaction_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON portfolios(user_id);
@@ -105,6 +120,9 @@ CREATE INDEX IF NOT EXISTS idx_market_data_timestamp ON market_data(timestamp);
 CREATE INDEX IF NOT EXISTS idx_historical_prices_symbol_date ON historical_prices(symbol, date);
 CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_transaction_history_portfolio_id ON transaction_history(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_transaction_history_symbol ON transaction_history(symbol);
+CREATE INDEX IF NOT EXISTS idx_transaction_history_date ON transaction_history(transaction_date);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()

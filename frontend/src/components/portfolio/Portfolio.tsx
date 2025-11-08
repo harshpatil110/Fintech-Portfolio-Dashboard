@@ -14,21 +14,30 @@ import {
   Chip,
   Alert,
   CircularProgress,
-  Tooltip
+  Tooltip,
+  Checkbox,
+  Toolbar
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon
+  TrendingDown as TrendingDownIcon,
+  History as HistoryIcon,
+  SelectAll as SelectAllIcon,
+  Settings as SettingsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePortfolio } from '../../hooks/usePortfolio';
-import { StockPosition } from '../../types/portfolio';
+import { StockPosition, PortfolioFilters } from '../../types/portfolio';
+import { portfolioService } from '../../services/portfolioService';
 import { AddPosition } from './AddPosition';
 import { EditPosition } from './EditPosition';
 import { RemovePosition } from './RemovePosition';
+import { TransactionHistoryComponent } from './TransactionHistory';
+import { BulkOperations } from './BulkOperations';
+import { PortfolioFiltersComponent } from './PortfolioFilters';
 
 export const Portfolio: React.FC = () => {
   const { user } = useAuth();
@@ -37,7 +46,23 @@ export const Portfolio: React.FC = () => {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<StockPosition | null>(null);
+  const [selectedPositions, setSelectedPositions] = useState<StockPosition[]>([]);
+  const [filteredPositions, setFilteredPositions] = useState<StockPosition[]>([]);
+  const [filters, setFilters] = useState<PortfolioFilters>({
+    sortBy: 'symbol',
+    sortOrder: 'asc'
+  });
+  const [filtersLoading, setFiltersLoading] = useState(false);
+
+  // Initialize filtered positions when portfolio changes
+  useEffect(() => {
+    if (portfolio?.positions) {
+      setFilteredPositions(portfolio.positions);
+    }
+  }, [portfolio?.positions]);
 
   const handleAddPosition = () => {
     setAddDialogOpen(true);
@@ -53,15 +78,61 @@ export const Portfolio: React.FC = () => {
     setRemoveDialogOpen(true);
   };
 
+  const handleShowHistory = () => {
+    setHistoryDialogOpen(true);
+  };
+
+  const handleBulkOperations = () => {
+    setBulkDialogOpen(true);
+  };
+
   const handleDialogClose = () => {
     setAddDialogOpen(false);
     setEditDialogOpen(false);
     setRemoveDialogOpen(false);
+    setHistoryDialogOpen(false);
+    setBulkDialogOpen(false);
     setSelectedPosition(null);
   };
 
   const handleSuccess = () => {
     refetch();
+    setSelectedPositions([]);
+    applyFilters();
+  };
+
+  const handleSelectPosition = (position: StockPosition, checked: boolean) => {
+    if (checked) {
+      setSelectedPositions([...selectedPositions, position]);
+    } else {
+      setSelectedPositions(selectedPositions.filter(p => p.id !== position.id));
+    }
+  };
+
+  const handleSelectAll = () => {
+    if (selectedPositions.length === filteredPositions.length) {
+      setSelectedPositions([]);
+    } else {
+      setSelectedPositions([...filteredPositions]);
+    }
+  };
+
+  const applyFilters = async () => {
+    if (!user?.id) return;
+
+    setFiltersLoading(true);
+    try {
+      const filtered = await portfolioService.getFilteredPositions(user.id, filters);
+      setFilteredPositions(filtered);
+    } catch (err) {
+      console.error('Failed to apply filters:', err);
+      // Fallback to original positions
+      if (portfolio?.positions) {
+        setFilteredPositions(portfolio.positions);
+      }
+    } finally {
+      setFiltersLoading(false);
+    }
   };
 
   const formatCurrency = (value: number) => {
@@ -89,14 +160,24 @@ export const Portfolio: React.FC = () => {
         <Typography variant="h4" component="h1">
           Portfolio Management
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={handleAddPosition}
-          disabled={!user}
-        >
-          Add Position
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<HistoryIcon />}
+            onClick={handleShowHistory}
+            disabled={!user}
+          >
+            History
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={handleAddPosition}
+            disabled={!user}
+          >
+            Add Position
+          </Button>
+        </Box>
       </Box>
 
       {error && (
@@ -111,12 +192,45 @@ export const Portfolio: React.FC = () => {
         </Alert>
       )}
 
+      {/* Filters */}
+      {portfolio?.positions && portfolio.positions.length > 0 && (
+        <PortfolioFiltersComponent
+          filters={filters}
+          onFiltersChange={setFilters}
+          onApplyFilters={applyFilters}
+          availableSymbols={portfolio.positions.map(p => p.symbol)}
+        />
+      )}
+
       <Paper sx={{ overflow: 'hidden' }}>
-        {portfolio?.positions && portfolio.positions.length > 0 ? (
+        {/* Bulk Operations Toolbar */}
+        {selectedPositions.length > 0 && (
+          <Toolbar sx={{ bgcolor: 'primary.light', color: 'primary.contrastText' }}>
+            <Typography variant="h6" sx={{ flex: 1 }}>
+              {selectedPositions.length} position{selectedPositions.length > 1 ? 's' : ''} selected
+            </Typography>
+            <Button
+              color="inherit"
+              startIcon={<SettingsIcon />}
+              onClick={handleBulkOperations}
+            >
+              Bulk Operations
+            </Button>
+          </Toolbar>
+        )}
+
+        {filteredPositions.length > 0 ? (
           <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      indeterminate={selectedPositions.length > 0 && selectedPositions.length < filteredPositions.length}
+                      checked={filteredPositions.length > 0 && selectedPositions.length === filteredPositions.length}
+                      onChange={handleSelectAll}
+                    />
+                  </TableCell>
                   <TableCell>Stock</TableCell>
                   <TableCell align="right">Quantity</TableCell>
                   <TableCell align="right">Avg Cost</TableCell>
@@ -128,7 +242,7 @@ export const Portfolio: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {portfolio.positions.map((position) => {
+                {(filtersLoading ? portfolio?.positions || [] : filteredPositions).map((position) => {
                   const costBasis = position.quantity * position.averageCost;
                   const marketValue = position.marketValue || (position.currentPrice ? position.quantity * position.currentPrice : costBasis);
                   const gainLoss = position.gainLoss || (marketValue - costBasis);
@@ -136,7 +250,13 @@ export const Portfolio: React.FC = () => {
                   const isGain = gainLoss >= 0;
 
                   return (
-                    <TableRow key={position.id} hover>
+                    <TableRow key={position.id} hover selected={selectedPositions.some(p => p.id === position.id)}>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          checked={selectedPositions.some(p => p.id === position.id)}
+                          onChange={(e) => handleSelectPosition(position, e.target.checked)}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
@@ -219,19 +339,27 @@ export const Portfolio: React.FC = () => {
         ) : (
           <Box sx={{ p: 4, textAlign: 'center' }}>
             <Typography variant="h6" color="text.secondary" gutterBottom>
-              No positions in your portfolio
+              {portfolio?.positions && portfolio.positions.length > 0 
+                ? 'No positions match your current filters'
+                : 'No positions in your portfolio'
+              }
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Start building your portfolio by adding your first stock position.
+              {portfolio?.positions && portfolio.positions.length > 0 
+                ? 'Try adjusting your filters to see more positions.'
+                : 'Start building your portfolio by adding your first stock position.'
+              }
             </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={handleAddPosition}
-              disabled={!user}
-            >
-              Add Your First Position
-            </Button>
+            {(!portfolio?.positions || portfolio.positions.length === 0) && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={handleAddPosition}
+                disabled={!user}
+              >
+                Add Your First Position
+              </Button>
+            )}
           </Box>
         )}
       </Paper>
@@ -254,6 +382,18 @@ export const Portfolio: React.FC = () => {
         open={removeDialogOpen}
         position={selectedPosition}
         onClose={handleDialogClose}
+        onSuccess={handleSuccess}
+      />
+
+      <TransactionHistoryComponent
+        open={historyDialogOpen}
+        onClose={handleDialogClose}
+      />
+
+      <BulkOperations
+        open={bulkDialogOpen}
+        onClose={handleDialogClose}
+        selectedPositions={selectedPositions}
         onSuccess={handleSuccess}
       />
     </Box>

@@ -92,3 +92,31 @@ export interface PortfolioFilters {
   sortBy?: 'symbol' | 'value' | 'gainLoss' | 'gainLossPercent' | 'allocation';
   sortOrder?: 'asc' | 'desc';
 }
+
+export interface TransactionHistory {
+  id: string;
+  portfolioId: string;
+  positionId?: string;
+  symbol: string;
+  transactionType: 'BUY' | 'SELL' | 'UPDATE' | 'DELETE';
+  quantity?: number;
+  price?: number;
+  totalValue?: number;
+  notes?: string;
+  transactionDate: Date;
+  createdAt: Date;
+}
+
+export interface BulkPositionOperation {
+  positionIds: string[];
+  operation: 'delete' | 'update';
+  updateData?: Partial<UpdateStockPositionRequest>;
+}
+
+export interface BulkOperationResult {
+  successful: string[];
+  failed: Array<{
+    positionId: string;
+    error: string;
+  }>;
+}

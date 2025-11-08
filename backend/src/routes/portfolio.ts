@@ -1,11 +1,11 @@
 import { Router, Response } from 'express';
-import { body } from 'express-validator';
+import { body, query } from 'express-validator';
 import { PortfolioRepository } from '../repositories/PortfolioRepository';
 import { authenticateToken, AuthenticatedRequest } from '../utils/auth';
 import { handleValidationErrors } from '../utils/validation';
 import { MarketDataService, createMarketDataService } from '../services/MarketDataService';
 import { PortfolioCalculations } from '../models/calculations';
-import { StockPosition, PortfolioSummary } from '../models/Portfolio';
+import { StockPosition, PortfolioSummary, PortfolioFilters, BulkPositionOperation } from '../models/Portfolio';
 
 const router = Router();
 const portfolioRepository = new PortfolioRepository();
@@ -470,6 +470,251 @@ router.delete('/position/:id',
         error: {
           code: 'INTERNAL_ERROR',
           message: 'Failed to remove stock position',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/portfolio/:userId/history
+ * Get transaction history for user's portfolio
+ */
+router.get('/:userId/history',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const requestedUserId = req.params.userId;
+      const authenticatedUserId = req.user!.userId;
+      const limit = parseInt(req.query.limit as string) || 50;
+
+      // Ensure users can only access their own transaction history
+      if (requestedUserId !== authenticatedUserId) {
+        res.status(403).json({
+          error: {
+            code: 'UNAUTHORIZED_ACCESS',
+            message: 'You can only access your own transaction history',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      // Get user's portfolios
+      const portfolios = await portfolioRepository.findByUserId(requestedUserId);
+      
+      if (portfolios.length === 0) {
+        res.json({
+          message: 'Transaction history retrieved successfully',
+          data: [],
+          timestamp: new Date()
+        });
+        return;
+      }
+
+      // Get transaction history for the first portfolio (default portfolio)
+      const portfolio = portfolios[0];
+      const history = await portfolioRepository.getTransactionHistory(portfolio.id, limit);
+
+      res.json({
+        message: 'Transaction history retrieved successfully',
+        data: history,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error('Error retrieving transaction history:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to retrieve transaction history',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/portfolio/:userId/positions/filtered
+ * Get filtered and sorted positions
+ */
+router.get('/:userId/positions/filtered',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const requestedUserId = req.params.userId;
+      const authenticatedUserId = req.user!.userId;
+
+      // Ensure users can only access their own portfolio
+      if (requestedUserId !== authenticatedUserId) {
+        res.status(403).json({
+          error: {
+            code: 'UNAUTHORIZED_ACCESS',
+            message: 'You can only access your own portfolio',
+            timestamp: new Date()
+          }
+        });
+        return;
+      }
+
+      // Parse filters from query parameters
+      const filters: PortfolioFilters = {
+        symbols: req.query.symbols ? (req.query.symbols as string).split(',') : undefined,
+        minValue: req.query.minValue ? parseFloat(req.query.minValue as string) : undefined,
+        maxValue: req.query.maxValue ? parseFloat(req.query.maxValue as string) : undefined,
+        gainersOnly: req.query.gainersOnly === 'true',
+        losersOnly: req.query.losersOnly === 'true',
+        sortBy: req.query.sortBy as any || 'symbol',
+        sortOrder: req.query.sortOrder as any || 'asc'
+      };
+
+      // Get user's portfolios
+      const portfolios = await portfolioRepository.findByUserId(requestedUserId);
+      
+      if (portfolios.length === 0) {
+        res.json({
+          message: 'Filtered positions retrieved successfully',
+          data: [],
+          timestamp: new Date()
+        });
+        return;
+      }
+
+      // Get filtered positions for the first portfolio (default portfolio)
+      const portfolio = portfolios[0];
+      const positions = await portfolioRepository.findPositionsWithFilters(portfolio.id, filters);
+
+      // Apply market data and additional filtering if needed
+      let filteredPositions = positions;
+      
+      if (marketDataService && (filters.gainersOnly || filters.losersOnly || filters.minValue || filters.maxValue)) {
+        try {
+          const symbols = positions.map(pos => pos.symbol);
+          const quotes = await marketDataService.getBatchQuotes(symbols);
+          const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+          
+          // Update positions with current market data
+          const updatedPositions = positions.map(position => {
+            const quote = quoteMap.get(position.symbol);
+            if (quote) {
+              return PortfolioCalculations.updatePositionWithMarketData(position, quote);
+            }
+            return {
+              ...position,
+              currentPrice: position.averageCost,
+              marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
+              gainLoss: 0,
+              gainLossPercent: 0
+            };
+          });
+
+          // Apply gain/loss and value filters
+          filteredPositions = updatedPositions.filter(position => {
+            if (filters.gainersOnly && (position.gainLoss || 0) <= 0) return false;
+            if (filters.losersOnly && (position.gainLoss || 0) >= 0) return false;
+            if (filters.minValue && (position.marketValue || 0) < filters.minValue) return false;
+            if (filters.maxValue && (position.marketValue || 0) > filters.maxValue) return false;
+            return true;
+          });
+        } catch (marketDataError) {
+          console.error('Failed to fetch market data for filtering:', marketDataError);
+          // Continue with basic filtering without market data
+        }
+      }
+
+      res.json({
+        message: 'Filtered positions retrieved successfully',
+        data: filteredPositions,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error('Error retrieving filtered positions:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to retrieve filtered positions',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/portfolio/bulk-operations
+ * Perform bulk operations on multiple positions
+ */
+router.post('/bulk-operations',
+  authenticateToken,
+  body('operation').isIn(['delete', 'update']).withMessage('Operation must be either delete or update'),
+  body('positionIds').isArray({ min: 1 }).withMessage('Position IDs array is required'),
+  body('positionIds.*').isUUID().withMessage('Each position ID must be a valid UUID'),
+  body('updateData').optional().isObject().withMessage('Update data must be an object'),
+  handleValidationErrors,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const { operation, positionIds, updateData } = req.body;
+      const userId = req.user!.userId;
+
+      // Verify all positions belong to the user
+      for (const positionId of positionIds) {
+        const position = await portfolioRepository.findPositionById(positionId);
+        if (!position) {
+          res.status(404).json({
+            error: {
+              code: 'POSITION_NOT_FOUND',
+              message: `Position ${positionId} not found`,
+              timestamp: new Date()
+            }
+          });
+          return;
+        }
+
+        const portfolio = await portfolioRepository.findById(position.portfolioId);
+        if (!portfolio || portfolio.userId !== userId) {
+          res.status(403).json({
+            error: {
+              code: 'UNAUTHORIZED_ACCESS',
+              message: 'You do not have permission to modify these positions',
+              timestamp: new Date()
+            }
+          });
+          return;
+        }
+      }
+
+      let result;
+      if (operation === 'delete') {
+        result = await portfolioRepository.bulkDeletePositions(positionIds);
+      } else if (operation === 'update') {
+        if (!updateData) {
+          res.status(400).json({
+            error: {
+              code: 'MISSING_UPDATE_DATA',
+              message: 'Update data is required for update operation',
+              timestamp: new Date()
+            }
+          });
+          return;
+        }
+        result = await portfolioRepository.bulkUpdatePositions(positionIds, updateData);
+      }
+
+      res.json({
+        message: `Bulk ${operation} operation completed`,
+        data: result,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error('Error performing bulk operation:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to perform bulk operation',
           timestamp: new Date()
         }
       });

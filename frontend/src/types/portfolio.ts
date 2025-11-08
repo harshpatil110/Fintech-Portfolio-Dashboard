@@ -67,3 +67,41 @@ export interface UpdateStockPositionRequest {
   averageCost?: number;
   purchaseDate?: string;
 }
+
+export interface TransactionHistory {
+  id: string;
+  portfolioId: string;
+  positionId?: string;
+  symbol: string;
+  transactionType: 'BUY' | 'SELL' | 'UPDATE' | 'DELETE';
+  quantity?: number;
+  price?: number;
+  totalValue?: number;
+  notes?: string;
+  transactionDate: string;
+  createdAt: string;
+}
+
+export interface PortfolioFilters {
+  symbols?: string[];
+  minValue?: number;
+  maxValue?: number;
+  gainersOnly?: boolean;
+  losersOnly?: boolean;
+  sortBy?: 'symbol' | 'value' | 'gainLoss' | 'gainLossPercent' | 'allocation';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface BulkOperationRequest {
+  operation: 'delete' | 'update';
+  positionIds: string[];
+  updateData?: Partial<UpdateStockPositionRequest>;
+}
+
+export interface BulkOperationResult {
+  successful: string[];
+  failed: Array<{
+    positionId: string;
+    error: string;
+  }>;
+}
