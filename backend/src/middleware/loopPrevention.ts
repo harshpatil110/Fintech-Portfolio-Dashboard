@@ -30,14 +30,17 @@ export function requestDepthTracking(config: Partial<LoopPreventionConfig> = {})
       
       // Check if depth exceeds maximum
       if (depth > finalConfig.maxDepth) {
+        const requestId = Array.isArray(req.headers['x-request-id']) 
+          ? req.headers['x-request-id'][0] 
+          : req.headers['x-request-id'];
+        
         logger.error('Middleware depth limit exceeded', new Error('Infinite loop detected'), {
-          depth,
-          maxDepth: finalConfig.maxDepth,
           path: req.path,
           method: req.method,
-          requestId: Array.isArray(req.headers['x-request-id']) 
-            ? req.headers['x-request-id'][0] 
-            : req.headers['x-request-id']
+          requestId
+        }, {
+          depth,
+          maxDepth: finalConfig.maxDepth
         });
         
         return res.status(508).json({
@@ -54,13 +57,16 @@ export function requestDepthTracking(config: Partial<LoopPreventionConfig> = {})
       
       // Log warning if approaching limit
       if (depth > finalConfig.maxDepth * 0.7) {
-        logger.warn('High middleware depth detected', undefined, {
-          depth,
-          maxDepth: finalConfig.maxDepth,
+        const requestId = Array.isArray(req.headers['x-request-id']) 
+          ? req.headers['x-request-id'][0] 
+          : req.headers['x-request-id'];
+        
+        logger.warn('High middleware depth detected', {
           path: req.path,
-          requestId: Array.isArray(req.headers['x-request-id']) 
-            ? req.headers['x-request-id'][0] 
-            : req.headers['x-request-id']
+          requestId
+        }, {
+          depth,
+          maxDepth: finalConfig.maxDepth
         });
       }
       
@@ -83,11 +89,16 @@ export function circularRedirectPrevention() {
       const currentPath = `${req.method}:${req.path}`;
       
       if (visitedPaths.has(currentPath)) {
+        const requestId = Array.isArray(req.headers['x-request-id']) 
+          ? req.headers['x-request-id'][0] 
+          : req.headers['x-request-id'];
+        
         logger.error('Circular redirect detected', new Error('Same path visited twice'), {
           path: req.path,
           method: req.method,
-          visitedPaths: Array.from(visitedPaths),
-          requestId: req.headers['x-request-id']
+          requestId
+        }, {
+          visitedPaths: Array.from(visitedPaths)
         });
         
         return res.status(508).json({
@@ -124,10 +135,13 @@ export function circularRedirectPrevention() {
               : req.headers['x-request-id'];
             
             logger.error('Circular redirect prevented', new Error('Redirect to visited path'), {
+              path: req.path,
+              method: req.method,
+              requestId
+            }, {
               from: currentPath,
               to: targetKey,
-              visitedPaths: Array.from(visitedPaths),
-              requestId
+              visitedPaths: Array.from(visitedPaths)
             });
             
             return res.status(508).json({
@@ -175,14 +189,17 @@ export function middlewareExecutionTimeLimit(config: Partial<LoopPreventionConfi
       
       // Check if execution time exceeds limit
       if (elapsed > finalConfig.maxExecutionTime) {
+        const requestId = Array.isArray(req.headers['x-request-id']) 
+          ? req.headers['x-request-id'][0] 
+          : req.headers['x-request-id'];
+        
         logger.error('Middleware execution time limit exceeded', new Error('Timeout'), {
-          elapsed,
-          maxExecutionTime: finalConfig.maxExecutionTime,
           path: req.path,
           method: req.method,
-          requestId: Array.isArray(req.headers['x-request-id']) 
-            ? req.headers['x-request-id'][0] 
-            : req.headers['x-request-id']
+          requestId
+        }, {
+          elapsed,
+          maxExecutionTime: finalConfig.maxExecutionTime
         });
         
         return res.status(508).json({
@@ -199,11 +216,16 @@ export function middlewareExecutionTimeLimit(config: Partial<LoopPreventionConfi
       
       // Log warning if approaching limit
       if (elapsed > finalConfig.maxExecutionTime * 0.8) {
-        logger.warn('High middleware execution time', undefined, {
-          elapsed,
-          maxExecutionTime: finalConfig.maxExecutionTime,
+        const requestId = Array.isArray(req.headers['x-request-id']) 
+          ? req.headers['x-request-id'][0] 
+          : req.headers['x-request-id'];
+        
+        logger.warn('High middleware execution time', {
           path: req.path,
-          requestId: req.headers['x-request-id']
+          requestId
+        }, {
+          elapsed,
+          maxExecutionTime: finalConfig.maxExecutionTime
         });
       }
       

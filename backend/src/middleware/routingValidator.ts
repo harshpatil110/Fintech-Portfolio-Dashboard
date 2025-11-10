@@ -62,13 +62,16 @@ export function validateRouteParams(paramValidations?: Record<string, RouteParam
         
         if (validation) {
           if (!validation.pattern.test(paramValue)) {
-            logger.warn('Route parameter validation failed', undefined, {
-              param: paramName,
-              value: paramValue,
+            const requestId = Array.isArray(req.headers['x-request-id']) 
+              ? req.headers['x-request-id'][0] 
+              : req.headers['x-request-id'];
+            
+            logger.warn('Route parameter validation failed', {
               path: req.path,
-              requestId: Array.isArray(req.headers['x-request-id']) 
-                ? req.headers['x-request-id'][0] 
-                : req.headers['x-request-id']
+              requestId
+            }, {
+              param: paramName,
+              value: paramValue
             });
             
             return res.status(400).json({
@@ -104,11 +107,16 @@ export function detectRedirectLoop(config: Partial<RedirectLoopConfig> = {}) {
       const redirectCount = parseInt(req.headers[finalConfig.trackingHeader.toLowerCase()] as string || '0', 10);
       
       if (redirectCount >= finalConfig.maxRedirects) {
+        const requestId = Array.isArray(req.headers['x-request-id']) 
+          ? req.headers['x-request-id'][0] 
+          : req.headers['x-request-id'];
+        
         logger.error('Redirect loop detected', new Error('Too many redirects'), {
           path: req.path,
+          requestId
+        }, {
           redirectCount,
-          maxRedirects: finalConfig.maxRedirects,
-          requestId: req.headers['x-request-id']
+          maxRedirects: finalConfig.maxRedirects
         });
         
         return res.status(508).json({
@@ -127,15 +135,19 @@ export function detectRedirectLoop(config: Partial<RedirectLoopConfig> = {}) {
       
       // Override res.redirect to track redirects
       const originalRedirect = res.redirect.bind(res);
-      res.redirect = function(statusOrUrl: number | string, url?: string) {
+      (res as any).redirect = function(statusOrUrl: number | string, url?: string) {
         const newCount = redirectCount + 1;
+        const requestId = Array.isArray(req.headers['x-request-id']) 
+          ? req.headers['x-request-id'][0] 
+          : req.headers['x-request-id'];
         
         if (newCount >= finalConfig.maxRedirects) {
           logger.error('Redirect loop prevented', new Error('Max redirects reached'), {
             path: req.path,
+            requestId
+          }, {
             redirectCount: newCount,
-            maxRedirects: finalConfig.maxRedirects,
-            requestId: req.headers['x-request-id']
+            maxRedirects: finalConfig.maxRedirects
           });
           
           return res.status(508).json({
@@ -143,7 +155,7 @@ export function detectRedirectLoop(config: Partial<RedirectLoopConfig> = {}) {
               code: 'REDIRECT_LOOP_PREVENTED',
               message: 'Redirect prevented to avoid infinite loop.',
               timestamp: new Date().toISOString(),
-              requestId: req.headers['x-request-id']
+              requestId
             }
           });
         }
@@ -177,12 +189,20 @@ export function notFoundHandler(req: Request, res: Response) {
   // Provide helpful suggestions based on the path
   const suggestions = generateSuggestions(path, method);
   
-  logger.warn('Route not found', undefined, {
+  const requestId = Array.isArray(req.headers['x-request-id']) 
+    ? req.headers['x-request-id'][0] 
+    : req.headers['x-request-id'];
+  
+  const userAgent = Array.isArray(req.headers['user-agent']) 
+    ? req.headers['user-agent'][0] 
+    : req.headers['user-agent'];
+  
+  logger.warn('Route not found', {
     method,
     path,
     query: req.query,
-    requestId: req.headers['x-request-id'],
-    userAgent: req.headers['user-agent']
+    requestId,
+    userAgent
   });
   
   res.status(404).json({
@@ -325,11 +345,16 @@ export function validateParam(paramName: string, pattern: RegExp, errorMessage: 
     }
     
     if (!pattern.test(paramValue)) {
-      logger.warn('Parameter validation failed', undefined, {
-        param: paramName,
-        value: paramValue,
+      const requestId = Array.isArray(req.headers['x-request-id']) 
+        ? req.headers['x-request-id'][0] 
+        : req.headers['x-request-id'];
+      
+      logger.warn('Parameter validation failed', {
         path: req.path,
-        requestId: req.headers['x-request-id']
+        requestId
+      }, {
+        param: paramName,
+        value: paramValue
       });
       
       return res.status(400).json({
