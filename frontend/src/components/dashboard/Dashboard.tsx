@@ -9,7 +9,7 @@ import {
   useTheme,
   useMediaQuery,
 } from '@mui/material';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuthHook';
 import { usePortfolio } from '../../hooks/usePortfolio';
 import { PortfolioSummaryCards } from './PortfolioSummaryCards';
 import { PortfolioAllocationChart } from './PortfolioAllocationChart';

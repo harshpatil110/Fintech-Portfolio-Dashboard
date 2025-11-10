@@ -9,7 +9,7 @@ import {
   Tabs,
   Tab
 } from '@mui/material';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuthHook';
 import { TimeRange, PortfolioPerformanceHistory, PerformanceComparison, PerformanceMetrics as PerformanceMetricsType } from '../../types/performance';
 import { performanceService } from '../../services/performanceService';
 import { TimeRangeSelector } from './TimeRangeSelector';

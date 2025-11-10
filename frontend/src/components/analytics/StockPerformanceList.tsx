@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Grid, CircularProgress, Alert, Box, Typography } from '@mui/material';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuthHook';
 import { usePortfolio } from '../../hooks/usePortfolio';
 import { TimeRange, StockPerformanceHistory } from '../../types/performance';
 import { performanceService } from '../../services/performanceService';

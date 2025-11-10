@@ -32,7 +32,7 @@ import {
   History as HistoryIcon,
   Settings as SettingsIcon
 } from '@mui/icons-material';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuthHook';
 import { usePortfolio } from '../../hooks/usePortfolio';
 import { StockPosition, PortfolioFilters } from '../../types/portfolio';
 import { portfolioService } from '../../services/portfolioService';

@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuthHook';
 import { watchlistService } from '../../services/watchlistService';
 import { WatchlistItem, WatchlistFilters as WatchlistFiltersType } from '../../types/watchlist';
 import { WatchlistItemCard } from './WatchlistItemCard';
@@ -192,7 +192,7 @@ export const Watchlist: React.FC = () => {
       );
 
       const result = await watchlistService.bulkAddToWatchlist({ stocks: stocksToAdd });
-      
+
       const addedCount = result.summary.added;
       const skippedCount = result.summary.skipped;
       const errorCount = result.summary.errors;
@@ -220,11 +220,11 @@ export const Watchlist: React.FC = () => {
 
   return (
     <Box>
-      <Box 
-        display="flex" 
+      <Box
+        display="flex"
         flexDirection={isMobile ? 'column' : 'row'}
-        justifyContent="space-between" 
-        alignItems={isMobile ? 'flex-start' : 'center'} 
+        justifyContent="space-between"
+        alignItems={isMobile ? 'flex-start' : 'center'}
         mb={isMobile ? 2 : 3}
         gap={isMobile ? 2 : 0}
       >
@@ -285,8 +285,8 @@ export const Watchlist: React.FC = () => {
 
       {watchlistItems.length > 0 && (
         <Box mb={2} display="flex" gap={1} alignItems="center" flexWrap="wrap">
-          <Chip 
-            label={`${watchlistItems.length} / 50 stocks`} 
+          <Chip
+            label={`${watchlistItems.length} / 50 stocks`}
             size={isMobile ? 'small' : 'medium'}
           />
           {watchlistItems.filter((item) => item.alertPrice).length > 0 && (
@@ -302,15 +302,15 @@ export const Watchlist: React.FC = () => {
               connectionState === 'connected'
                 ? 'Live Updates'
                 : connectionState === 'connecting'
-                ? 'Connecting...'
-                : 'Offline'
+                  ? 'Connecting...'
+                  : 'Offline'
             }
             color={
               connectionState === 'connected'
                 ? 'success'
                 : connectionState === 'connecting'
-                ? 'warning'
-                : 'default'
+                  ? 'warning'
+                  : 'default'
             }
             size="small"
             variant="outlined"

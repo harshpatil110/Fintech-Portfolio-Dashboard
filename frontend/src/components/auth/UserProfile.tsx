@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import { UpdateProfileData } from '../../types/auth';
 import { validateEmail, validateName } from '../../utils/validation';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuthHook';
 
 export const UserProfile: React.FC = () => {
   const { user, updateProfile, logout, isLoading } = useAuth();

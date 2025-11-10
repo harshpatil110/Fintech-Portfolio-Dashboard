@@ -27,7 +27,7 @@ import {
 } from '@mui/icons-material';
 import { TransactionHistory } from '../../types/portfolio';
 import { portfolioService } from '../../services/portfolioService';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../../hooks/useAuthHook';
 
 interface TransactionHistoryProps {
   open: boolean;
