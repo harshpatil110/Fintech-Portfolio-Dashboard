@@ -1,7 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App'
-import './index.css'
+import SimpleApp from './SimpleApp'
 
 console.log('Main.tsx loaded');
 
@@ -15,13 +14,13 @@ if (!rootElement) {
 try {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
-      <App />
+      <SimpleApp />
     </React.StrictMode>,
   )
   console.log('React app rendered');
 } catch (error) {
   console.error('Error rendering app:', error);
-  rootElement.innerHTML = `<div style="padding: 50px; color: red;">
+  rootElement.innerHTML = `<div style="padding: 50px; color: red; background: white;">
     <h1>Error Loading App</h1>
     <p>${error}</p>
     <p>Check the console for more details.</p>
