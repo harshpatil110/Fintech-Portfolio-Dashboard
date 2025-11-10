@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Grid, CircularProgress, Alert, Box, Typography } from '@mui/material';
+import { CircularProgress, Alert, Box, Typography } from '@mui/material';
+import Grid from '@mui/material/Unstable_Grid2';
 import { useAuth } from '../../hooks/useAuthHook';
-import { usePortfolio } from '../../hooks/usePortfolio';
+import { usePortfolio } from '../../hooks/useMockPortfolio';
 import { TimeRange, StockPerformanceHistory } from '../../types/performance';
 import { performanceService } from '../../services/performanceService';
 import { StockPerformanceChart } from './StockPerformanceChart';

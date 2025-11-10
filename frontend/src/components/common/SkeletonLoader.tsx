@@ -1,4 +1,5 @@
-import { Box, Card, CardContent, Skeleton, Grid } from '@mui/material';
+import { Box, Card, CardContent, Skeleton } from '@mui/material';
+import Grid from '@mui/material/Unstable_Grid2';
 
 interface SkeletonLoaderProps {
   variant?: 'dashboard' | 'portfolio' | 'watchlist' | 'chart' | 'card';

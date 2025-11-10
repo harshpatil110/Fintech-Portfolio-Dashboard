@@ -10,7 +10,7 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import { useAuth } from '../../hooks/useAuthHook';
-import { usePortfolio } from '../../hooks/usePortfolio';
+import { usePortfolio } from '../../hooks/useMockPortfolio';
 import { PortfolioSummaryCards } from './PortfolioSummaryCards';
 import { PortfolioAllocationChart } from './PortfolioAllocationChart';
 import { ErrorDisplay, SkeletonLoader } from '../common';

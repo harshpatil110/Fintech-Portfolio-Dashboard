@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, Paper, Typography, Grid, Divider } from '@mui/material';
+import { Box, Paper, Typography, Divider } from '@mui/material';
+import Grid from '@mui/material/Unstable_Grid2';
 import { TrendingUp, TrendingDown, ShowChart } from '@mui/icons-material';
 import { PerformanceMetrics as PerformanceMetricsType } from '../../types/performance';
 

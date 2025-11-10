@@ -33,7 +33,7 @@ import {
   Settings as SettingsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuthHook';
-import { usePortfolio } from '../../hooks/usePortfolio';
+import { usePortfolio } from '../../hooks/useMockPortfolio';
 import { StockPosition, PortfolioFilters } from '../../types/portfolio';
 import { portfolioService } from '../../services/portfolioService';
 import { AddPosition } from './AddPosition';

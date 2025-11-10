@@ -7,7 +7,6 @@ import {
   Button,
   Typography,
   Box,
-  Grid,
   Card,
   CardContent,
   Chip,
@@ -18,6 +17,7 @@ import {
   Tooltip,
   Paper
 } from '@mui/material';
+import Grid from '@mui/material/Unstable_Grid2';
 import {
   Close as CloseIcon,
   TrendingUp as TrendingUpIcon,
