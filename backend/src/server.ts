@@ -92,18 +92,28 @@ let webSocketService: WebSocketService;
 // Initialize services
 async function initializeServices() {
   try {
-    // Connect to Redis
-    if (!redisClient.isOpen) {
-      await redisClient.connect();
+    // Conditionally connect to Redis (set SKIP_REDIS=true to skip in dev)
+    if (process.env.SKIP_REDIS === 'true') {
+      console.log('⚠️ SKIP_REDIS=true — skipping Redis connection');
+    } else {
+      // Connect to Redis
+      if (!redisClient.isOpen) {
+        await redisClient.connect();
+      }
     }
-    
+
     // Initialize WebSocket service
     webSocketService = new WebSocketService(server);
-    
+
     console.log('✅ All services initialized successfully');
   } catch (error) {
     console.error('❌ Failed to initialize services:', error);
-    process.exit(1);
+    // In production we should fail-fast, but allow dev to continue without Redis
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    } else {
+      console.warn('Continuing without all services in non-production environment');
+    }
   }
 }
 

@@ -71,91 +71,93 @@ const theme = createTheme({
 });
 
 function App() {
+  console.log('App component rendering');
+  
   return (
     <ErrorBoundary>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <ToastProvider>
-          <AuthProvider>
-            <OfflineIndicator />
-            <Router>
+        <Router>
+          <ToastProvider>
+            <AuthProvider>
+              <OfflineIndicator />
               <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<AuthPage />} />
-            <Route path="/register" element={<AuthPage initialMode="register" />} />
-            <Route path="/reset-password" element={<AuthPage initialMode="password-reset" />} />
-            
-            {/* Protected routes */}
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Dashboard />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/portfolio"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Portfolio />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/watchlist"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Watchlist />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/analytics"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <Analytics />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/profile"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <UserProfile />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/examples/stock-selection"
-              element={
-                <ProtectedRoute>
-                  <Layout>
-                    <StockSelectionExample />
-                  </Layout>
-                </ProtectedRoute>
-              }
-            />
-            
-            {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            
-            {/* Catch all route - redirect to dashboard */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                {/* Public routes */}
+                <Route path="/login" element={<AuthPage />} />
+                <Route path="/register" element={<AuthPage initialMode="register" />} />
+                <Route path="/reset-password" element={<AuthPage initialMode="password-reset" />} />
+                
+                {/* Protected routes */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <Dashboard />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/portfolio"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <Portfolio />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/watchlist"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <Watchlist />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/analytics"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <Analytics />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/profile"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <UserProfile />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/examples/stock-selection"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <StockSelectionExample />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
+                />
+                
+                {/* Default redirect */}
+                <Route path="/" element={<Navigate to="/login" replace />} />
+                
+                {/* Catch all route - redirect to login */}
+                <Route path="*" element={<Navigate to="/login" replace />} />
               </Routes>
-            </Router>
-          </AuthProvider>
-        </ToastProvider>
+            </AuthProvider>
+          </ToastProvider>
+        </Router>
       </ThemeProvider>
     </ErrorBoundary>
   );
