@@ -75,37 +75,57 @@
   - Add circuit breaker state monitoring
   - _Requirements: 5.3, 5.4, 5.5_
 
-- [-] 5. Build comprehensive retry logic
+- [ ] 5. Build comprehensive retry logic
 
 
-- [-] 5.1 Create retry handler utility
+
+
+- [x] 5.1 Create retry handler utility
+
 
   - Write RetryHandler class with exponential backoff
   - Implement configurable retry attempts and delays
   - Add retry condition checking
   - _Requirements: 3.2, 3.3_
 
-- [ ] 5.2 Apply retry logic to API functions
+- [x] 5.2 Apply retry logic to API functions
+
+
   - Wrap API functions with retry handler
   - Configure retry settings per endpoint type
   - Add retry logging and monitoring
   - _Requirements: 3.1, 3.4, 3.5_
+-
 
-- [ ] 6. Implement rate limiting system
 
-- [ ] 6.1 Create Redis-based rate limiter
+- [x] 6. Implement rate limiting system
+
+
+
+
+
+- [x] 6.1 Create Redis-based rate limiter
+
+
   - Write RateLimiter class with Redis integration
   - Implement sliding window rate limiting algorithm
   - Add rate limit key generation per user/endpoint
   - _Requirements: 6.1, 6.2, 6.3, 6.5_
 
-- [ ] 6.2 Add rate limiting middleware
+- [x] 6.2 Add rate limiting middleware
+
+
   - Create middleware for rate limit checking
   - Implement 429 responses with retry-after headers
-  - Add different rate limits for portfolio vs market data endpoints
+  - Add different rate limits for
+
+
+ portfolio vs market data endpoints
   - _Requirements: 6.2, 6.3, 6.4_
 
 - [ ] 7. Build caching system
+
+
 
 - [ ] 7.1 Create cache manager utility
   - Write CacheManager class with Redis integration
@@ -116,6 +136,7 @@
 - [ ] 7.2 Integrate caching with API endpoints
   - Add caching to market data endpoints (60s TTL)
   - Add caching to portfolio endpoints (30s TTL)
+
   - Implement cache invalidation on data updates
   - Set appropriate cache-control headers
   - _Requirements: 9.1, 9.2, 9.5_
@@ -128,7 +149,9 @@
   - Add status code mapping for different error types
   - _Requirements: 7.1, 7.2, 7.4_
 
-- [ ] 8.2 Apply error handling to all endpoints
+
+- [ ] 8.2 Apply error handling to all endp
+oints
   - Wrap all API routes with error handler
   - Add request ID tracking for error correlation
   - Implement user-friendly error messages
@@ -140,7 +163,10 @@
   - Write error logging utility with structured logging
   - Add error context capture (request, user, stack trace)
   - Implement log level filtering
-  - _Requirements: 8.1, 8.2, 8.5_
+
+
+  -RIntngtate with8.1, 8.2, 8.service(Vercel Anycs or Setry)
+
 
 - [ ] 9.2 Add error monitoring and alerting
   - Integrate with monitoring service (Vercel Analytics or Sentry)

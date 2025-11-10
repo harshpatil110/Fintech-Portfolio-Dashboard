@@ -2,6 +2,8 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { StockQuote, StockSearchResult, HistoricalData, PricePoint, MarketStatus } from '../models/MarketData';
 import CircuitBreaker from '../utils/circuitBreaker';
 import CacheService from './CacheService';
+import { retryAsync } from '../middleware/retryMiddleware';
+import { ENDPOINT_RETRY_CONFIGS } from '../middleware/retryMiddleware';
 
 export interface MarketDataProvider {
   getQuote(symbol: string): Promise<StockQuote>;
@@ -48,37 +50,44 @@ export class AlphaVantageProvider implements MarketDataProvider {
   async getQuote(symbol: string): Promise<StockQuote> {
     await this.enforceRateLimit();
     
-    try {
-      const response = await this.client.get('', {
-        params: {
-          function: 'GLOBAL_QUOTE',
-          symbol: symbol.toUpperCase(),
-          apikey: this.apiKey
+    // Wrap API call with retry logic (Req 3.1, 3.2)
+    return retryAsync(
+      async () => {
+        try {
+          const response = await this.client.get('', {
+            params: {
+              function: 'GLOBAL_QUOTE',
+              symbol: symbol.toUpperCase(),
+              apikey: this.apiKey
+            }
+          });
+
+          const data = response.data;
+          
+          if (data['Error Message']) {
+            throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
+          }
+          
+          if (data['Note']) {
+            throw new Error('API rate limit exceeded. Please try again later.');
+          }
+
+          const quote = data['Global Quote'];
+          if (!quote || Object.keys(quote).length === 0) {
+            throw new Error(`No data found for symbol: ${symbol}`);
+          }
+
+          return this.parseGlobalQuote(quote, symbol);
+        } catch (error) {
+          if (axios.isAxiosError(error)) {
+            throw new Error(`Market data API request failed: ${error.message}`);
+          }
+          throw error;
         }
-      });
-
-      const data = response.data;
-      
-      if (data['Error Message']) {
-        throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
-      }
-      
-      if (data['Note']) {
-        throw new Error('API rate limit exceeded. Please try again later.');
-      }
-
-      const quote = data['Global Quote'];
-      if (!quote || Object.keys(quote).length === 0) {
-        throw new Error(`No data found for symbol: ${symbol}`);
-      }
-
-      return this.parseGlobalQuote(quote, symbol);
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`Market data API request failed: ${error.message}`);
-      }
-      throw error;
-    }
+      },
+      ENDPOINT_RETRY_CONFIGS.marketData,
+      { operation: 'getQuote', service: 'AlphaVantageProvider' }
+    );
   }
 
   async getBatchQuotes(symbols: string[]): Promise<StockQuote[]> {
@@ -102,94 +111,108 @@ export class AlphaVantageProvider implements MarketDataProvider {
   async searchSymbols(query: string): Promise<StockSearchResult[]> {
     await this.enforceRateLimit();
     
-    try {
-      const response = await this.client.get('', {
-        params: {
-          function: 'SYMBOL_SEARCH',
-          keywords: query,
-          apikey: this.apiKey
+    // Wrap API call with retry logic (Req 3.1, 3.2)
+    return retryAsync(
+      async () => {
+        try {
+          const response = await this.client.get('', {
+            params: {
+              function: 'SYMBOL_SEARCH',
+              keywords: query,
+              apikey: this.apiKey
+            }
+          });
+
+          const data = response.data;
+          
+          if (data['Error Message']) {
+            throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
+          }
+          
+          if (data['Note']) {
+            throw new Error('API rate limit exceeded. Please try again later.');
+          }
+
+          const matches = data['bestMatches'] || [];
+          return matches.slice(0, 10).map((match: any) => ({
+            symbol: match['1. symbol'],
+            companyName: match['2. name'],
+            exchange: match['4. region'],
+            type: match['3. type']
+          }));
+        } catch (error) {
+          if (axios.isAxiosError(error)) {
+            throw new Error(`Symbol search failed: ${error.message}`);
+          }
+          throw error;
         }
-      });
-
-      const data = response.data;
-      
-      if (data['Error Message']) {
-        throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
-      }
-      
-      if (data['Note']) {
-        throw new Error('API rate limit exceeded. Please try again later.');
-      }
-
-      const matches = data['bestMatches'] || [];
-      return matches.slice(0, 10).map((match: any) => ({
-        symbol: match['1. symbol'],
-        companyName: match['2. name'],
-        exchange: match['4. region'],
-        type: match['3. type']
-      }));
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`Symbol search failed: ${error.message}`);
-      }
-      throw error;
-    }
+      },
+      ENDPOINT_RETRY_CONFIGS.marketData,
+      { operation: 'searchSymbols', service: 'AlphaVantageProvider' }
+    );
   }
 
   async getHistoricalData(symbol: string, period: string = 'daily'): Promise<HistoricalData> {
     await this.enforceRateLimit();
     
-    try {
-      const functionName = period === 'intraday' ? 'TIME_SERIES_INTRADAY' : 'TIME_SERIES_DAILY';
-      const params: any = {
-        function: functionName,
-        symbol: symbol.toUpperCase(),
-        apikey: this.apiKey
-      };
+    // Wrap API call with retry logic (Req 3.1, 3.2)
+    return retryAsync(
+      async () => {
+        try {
+          const functionName = period === 'intraday' ? 'TIME_SERIES_INTRADAY' : 'TIME_SERIES_DAILY';
+          const params: any = {
+            function: functionName,
+            symbol: symbol.toUpperCase(),
+            apikey: this.apiKey
+          };
 
-      if (period === 'intraday') {
-        params.interval = '5min';
-      }
+          if (period === 'intraday') {
+            params.interval = '5min';
+          }
 
-      const response = await this.client.get('', { params });
-      const data = response.data;
-      
-      if (data['Error Message']) {
-        throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
-      }
-      
-      if (data['Note']) {
-        throw new Error('API rate limit exceeded. Please try again later.');
-      }
+          const response = await this.client.get('', { params });
+          const data = response.data;
+          
+          if (data['Error Message']) {
+            throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
+          }
+          
+          if (data['Note']) {
+            throw new Error('API rate limit exceeded. Please try again later.');
+          }
 
-      const timeSeriesKey = period === 'intraday' ? 'Time Series (5min)' : 'Time Series (Daily)';
-      const timeSeries = data[timeSeriesKey];
-      
-      if (!timeSeries) {
-        throw new Error(`No historical data found for symbol: ${symbol}`);
-      }
+          const timeSeriesKey = period === 'intraday' ? 'Time Series (5min)' : 'Time Series (Daily)';
+          const timeSeries = data[timeSeriesKey];
+          
+          if (!timeSeries) {
+            throw new Error(`No historical data found for symbol: ${symbol}`);
+          }
 
-      const pricePoints: PricePoint[] = Object.entries(timeSeries)
-        .map(([dateStr, values]: [string, any]) => ({
-          date: new Date(dateStr),
-          open: parseFloat(values['1. open']),
-          high: parseFloat(values['2. high']),
-          low: parseFloat(values['3. low']),
-          close: parseFloat(values['4. close']),
-          volume: parseInt(values['5. volume'])
-        }))
-        .sort((a, b) => a.date.getTime() - b.date.getTime());
+          const pricePoints: PricePoint[] = Object.entries(timeSeries)
+            .map(([dateStr, values]: [string, any]) => ({
+              date: new Date(dateStr),
+              open: parseFloat(values['1. open']),
+              high: parseFloat(values['2. high']),
+              low: parseFloat(values['3. low']),
+              close: parseFloat(values['4. close']),
+              volume: parseInt(values['5. volume'])
+            }))
+            .sort((a, b) => a.date.getTime() - b.date.getTime());
 
-      return {
-        symbol: symbol.toUpperCase(),
-        data: pricePoints
-      };
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`Historical data request failed: ${error.message}`);
-      }
-      throw error;
-    }
+          return {
+            symbol: symbol.toUpperCase(),
+            data: pricePoints
+          };
+        } catch (error) {
+          if (axios.isAxiosError(error)) {
+            throw new Error(`Historical data request failed: ${error.message}`);
+          }
+          throw error;
+        }
+      },
+      ENDPOINT_RETRY_CONFIGS.marketData,
+      { operation: 'getHistoricalData', service: 'AlphaVantageProvider' }
+    );
   }
 
   async validateSymbol(symbol: string): Promise<boolean> {

@@ -5,6 +5,7 @@ import { MarketDataRepository } from '../repositories/MarketDataRepository';
 import CacheService from '../services/CacheService';
 import { authenticateToken } from '../utils/auth';
 import { getTimeoutHandler } from '../middleware/timeoutHandler';
+import { getRetryStats } from '../middleware/retryMiddleware';
 
 /**
  * NOTE: Timeout handling is automatically applied via global middleware in server.ts
@@ -469,5 +470,44 @@ function getCircuitStateDescription(state: string): string {
       return 'Unknown state';
   }
 }
+
+// Retry monitoring endpoint
+// Requirement: 3.5 - Add retry logging and monitoring
+router.get('/health/retry-stats',
+  authenticateToken,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const allStats = getRetryStats();
+      const marketDataStats = getRetryStats('marketData');
+      
+      res.json({
+        data: {
+          overall: allStats,
+          marketData: marketDataStats || {
+            totalRequests: 0,
+            retriedRequests: 0,
+            successfulRetries: 0,
+            failedRetries: 0,
+            averageAttempts: 0,
+          },
+          summary: {
+            totalEndpoints: Object.keys(allStats).length,
+            healthStatus: marketDataStats && marketDataStats.failedRetries > 0 ? 'degraded' : 'healthy',
+          }
+        },
+        timestamp: new Date()
+      });
+    } catch (error) {
+      console.error('Error getting retry stats:', error);
+      res.status(500).json({
+        error: {
+          code: 'RETRY_STATS_ERROR',
+          message: 'Failed to get retry statistics',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
 
 export default router;
