@@ -68,7 +68,7 @@ const StockDetails: React.FC<StockDetailsProps> = ({
   const fetchQuoteData = async (symbol: string) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const quoteData = await marketService.getQuote(symbol);
       setQuote(quoteData);
@@ -186,17 +186,17 @@ const StockDetails: React.FC<StockDetailsProps> = ({
             <Typography variant="h5" component="h2" fontWeight="bold">
               {stock.symbol}
             </Typography>
-            <Chip 
-              label={stock.exchange} 
-              size="small" 
-              variant="outlined" 
+            <Chip
+              label={stock.exchange}
+              size="small"
+              variant="outlined"
               sx={{ ml: 1 }}
             />
           </Box>
           <Typography variant="h6" color="text.secondary" gutterBottom>
             {stock.companyName}
           </Typography>
-          
+
           {quote && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
               <Chip
@@ -241,20 +241,20 @@ const StockDetails: React.FC<StockDetailsProps> = ({
                   </Typography>
                   <Box sx={{ ml: 2, display: 'flex', alignItems: 'center' }}>
                     {getPriceChangeIcon(quote.change)}
-                    <Typography 
-                      variant="h6" 
-                      sx={{ 
-                        ml: 0.5, 
+                    <Typography
+                      variant="h6"
+                      sx={{
+                        ml: 0.5,
                         color: getPriceChangeColor(quote.change),
                         fontWeight: 'medium'
                       }}
                     >
                       {quote.change >= 0 ? '+' : ''}{formatCurrency(quote.change)}
                     </Typography>
-                    <Typography 
-                      variant="body1" 
-                      sx={{ 
-                        ml: 1, 
+                    <Typography
+                      variant="body1"
+                      sx={{
+                        ml: 1,
                         color: getPriceChangeColor(quote.change),
                         fontWeight: 'medium'
                       }}
@@ -263,7 +263,7 @@ const StockDetails: React.FC<StockDetailsProps> = ({
                     </Typography>
                   </Box>
                 </Box>
-                
+
                 <Typography variant="body2" color="text.secondary">
                   Previous Close: {formatCurrency(quote.previousClose)}
                 </Typography>
@@ -283,7 +283,7 @@ const StockDetails: React.FC<StockDetailsProps> = ({
                   </Typography>
                 </Paper>
               </Grid>
-              
+
               <Grid item xs={6}>
                 <Paper sx={{ p: 2, textAlign: 'center' }}>
                   <ShowChartIcon color="primary" sx={{ mb: 1 }} />
@@ -304,7 +304,7 @@ const StockDetails: React.FC<StockDetailsProps> = ({
                   Company Information
                 </Typography>
                 <Divider sx={{ mb: 2 }} />
-                
+
                 <Grid container spacing={2}>
                   <Grid item xs={6}>
                     <Typography variant="body2" color="text.secondary">
@@ -314,7 +314,7 @@ const StockDetails: React.FC<StockDetailsProps> = ({
                       {quote.symbol}
                     </Typography>
                   </Grid>
-                  
+
                   <Grid item xs={6}>
                     <Typography variant="body2" color="text.secondary">
                       Exchange
@@ -323,7 +323,7 @@ const StockDetails: React.FC<StockDetailsProps> = ({
                       {stock.exchange}
                     </Typography>
                   </Grid>
-                  
+
                   <Grid item xs={12}>
                     <Typography variant="body2" color="text.secondary">
                       Company Name
@@ -353,7 +353,7 @@ const StockDetails: React.FC<StockDetailsProps> = ({
                 </Button>
               </Tooltip>
             )}
-            
+
             {onAddToWatchlist && (
               <Tooltip title="Add to Watchlist">
                 <Button
@@ -374,10 +374,10 @@ const StockDetails: React.FC<StockDetailsProps> = ({
 
   if (variant === 'sidebar') {
     return (
-      <Paper 
-        elevation={2} 
-        sx={{ 
-          height: '100%', 
+      <Paper
+        elevation={2}
+        sx={{
+          height: '100%',
           overflow: 'auto',
           display: open ? 'block' : 'none'
         }}
@@ -404,11 +404,11 @@ const StockDetails: React.FC<StockDetailsProps> = ({
           <CloseIcon />
         </IconButton>
       </DialogTitle>
-      
+
       <DialogContent dividers>
         {renderContent()}
       </DialogContent>
-      
+
       <DialogActions sx={{ p: 2 }}>
         <Button onClick={onClose} variant="outlined">
           Close

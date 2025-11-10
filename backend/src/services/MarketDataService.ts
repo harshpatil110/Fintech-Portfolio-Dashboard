@@ -1,5 +1,7 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { StockQuote, StockSearchResult, HistoricalData, PricePoint, MarketStatus } from '../models/MarketData';
+import CircuitBreaker from '../utils/circuitBreaker';
+import CacheService from './CacheService';
 
 export interface MarketDataProvider {
   getQuote(symbol: string): Promise<StockQuote>;
@@ -251,37 +253,156 @@ export class AlphaVantageProvider implements MarketDataProvider {
 export class MarketDataService {
   private provider: MarketDataProvider;
   private fallbackProviders: MarketDataProvider[] = [];
+  private circuitBreaker: CircuitBreaker;
+  private cacheService: typeof CacheService;
 
   constructor(provider: MarketDataProvider) {
     this.provider = provider;
+    this.cacheService = CacheService;
+    
+    // Initialize circuit breaker with configuration from requirements
+    // Requirements: 5.1, 5.2, 5.3
+    this.circuitBreaker = new CircuitBreaker('MarketDataAPI', {
+      failureThreshold: 5,        // Open circuit after 5 consecutive failures (Req 5.2)
+      resetTimeout: 60000,        // Attempt reset after 60 seconds (Req 5.2)
+      monitoringPeriod: 120000,   // Track failures over 2 minute window
+      halfOpenMaxAttempts: 1      // Single test request in half-open state
+    });
   }
 
   addFallbackProvider(provider: MarketDataProvider): void {
     this.fallbackProviders.push(provider);
   }
 
+  /**
+   * Get quote with circuit breaker protection and cache fallback
+   * Requirements: 5.3, 5.4, 5.5
+   */
   async getQuote(symbol: string): Promise<StockQuote> {
-    return this.executeWithFallback(async (provider) => provider.getQuote(symbol));
+    return this.circuitBreaker.execute(
+      // Primary function - fetch from API
+      async () => {
+        return this.executeWithFallback(async (provider) => provider.getQuote(symbol));
+      },
+      // Fallback function - return cached data (Req 5.3, 5.4)
+      async () => {
+        const cached = await this.cacheService.getCachedQuote(symbol);
+        if (cached) {
+          console.log(`📦 Using cached data for ${symbol} (circuit breaker fallback)`);
+          return cached;
+        }
+        throw new Error(`No cached data available for ${symbol} and circuit is open`);
+      }
+    );
   }
 
+  /**
+   * Get batch quotes with circuit breaker protection
+   * Requirements: 5.3, 5.4, 5.5
+   */
   async getBatchQuotes(symbols: string[]): Promise<StockQuote[]> {
-    return this.executeWithFallback(async (provider) => provider.getBatchQuotes(symbols));
+    return this.circuitBreaker.execute(
+      // Primary function
+      async () => {
+        return this.executeWithFallback(async (provider) => provider.getBatchQuotes(symbols));
+      },
+      // Fallback function - return cached data for available symbols
+      async () => {
+        const cachedQuotes = await this.cacheService.getCachedBatchQuotes(symbols);
+        const quotes = Array.from(cachedQuotes.values());
+        
+        if (quotes.length > 0) {
+          console.log(`📦 Using cached data for ${quotes.length}/${symbols.length} symbols (circuit breaker fallback)`);
+          return quotes;
+        }
+        
+        throw new Error('No cached data available and circuit is open');
+      }
+    );
   }
 
+  /**
+   * Search symbols with circuit breaker protection
+   * Requirements: 5.3, 5.5
+   */
   async searchSymbols(query: string): Promise<StockSearchResult[]> {
-    return this.executeWithFallback(async (provider) => provider.searchSymbols(query));
+    return this.circuitBreaker.execute(
+      async () => {
+        return this.executeWithFallback(async (provider) => provider.searchSymbols(query));
+      },
+      async () => {
+        // For search, we can't provide meaningful cached fallback
+        console.warn('Symbol search unavailable - circuit breaker open');
+        return [];
+      }
+    );
   }
 
+  /**
+   * Get historical data with circuit breaker protection
+   * Requirements: 5.3, 5.4, 5.5
+   */
   async getHistoricalData(symbol: string, period?: string): Promise<HistoricalData> {
-    return this.executeWithFallback(async (provider) => provider.getHistoricalData(symbol, period));
+    return this.circuitBreaker.execute(
+      async () => {
+        return this.executeWithFallback(async (provider) => provider.getHistoricalData(symbol, period));
+      },
+      async () => {
+        // Try to get cached historical data
+        const cacheKey = `historical:${symbol}:${period || 'daily'}`;
+        const cached = await this.cacheService.get<HistoricalData>(cacheKey);
+        
+        if (cached) {
+          console.log(`📦 Using cached historical data for ${symbol} (circuit breaker fallback)`);
+          return cached;
+        }
+        
+        throw new Error(`No cached historical data available for ${symbol} and circuit is open`);
+      }
+    );
   }
 
+  /**
+   * Validate symbol with circuit breaker protection
+   */
   async validateSymbol(symbol: string): Promise<boolean> {
     try {
-      return await this.executeWithFallback(async (provider) => provider.validateSymbol(symbol));
+      return await this.circuitBreaker.execute(
+        async () => {
+          return this.executeWithFallback(async (provider) => provider.validateSymbol(symbol));
+        },
+        async () => {
+          // Check if we have cached data for this symbol
+          const cached = await this.cacheService.getCachedQuote(symbol);
+          return cached !== null;
+        }
+      );
     } catch (error) {
       return false;
     }
+  }
+
+  /**
+   * Get circuit breaker state for monitoring
+   * Requirement: 5.5
+   */
+  getCircuitBreakerState() {
+    return this.circuitBreaker.getState();
+  }
+
+  /**
+   * Get circuit breaker statistics for monitoring
+   * Requirement: 5.5
+   */
+  getCircuitBreakerStats() {
+    return this.circuitBreaker.getStats();
+  }
+
+  /**
+   * Manually reset circuit breaker (for admin/monitoring purposes)
+   */
+  resetCircuitBreaker(): void {
+    this.circuitBreaker.reset();
   }
 
   private async executeWithFallback<T>(operation: (provider: MarketDataProvider) => Promise<T>): Promise<T> {
@@ -290,7 +411,12 @@ export class MarketDataService {
 
     for (const provider of providers) {
       try {
-        return await operation(provider);
+        const result = await operation(provider);
+        
+        // Cache successful results for future fallback use
+        await this.cacheSuccessfulResult(result);
+        
+        return result;
       } catch (error) {
         lastError = error as Error;
         console.warn(`Market data provider failed, trying fallback:`, error);
@@ -298,6 +424,42 @@ export class MarketDataService {
     }
 
     throw lastError || new Error('All market data providers failed');
+  }
+
+  /**
+   * Cache successful API results for fallback use
+   */
+  private async cacheSuccessfulResult(result: any): Promise<void> {
+    try {
+      if (this.isStockQuote(result)) {
+        // Cache quote with 60 second TTL (Req 9.1)
+        await this.cacheService.cacheQuote(result.symbol, result, 60);
+      } else if (Array.isArray(result) && result.length > 0 && this.isStockQuote(result[0])) {
+        // Cache batch quotes
+        await this.cacheService.cacheBatchQuotes(result, 60);
+      } else if (this.isHistoricalData(result)) {
+        // Cache historical data with longer TTL
+        const cacheKey = `historical:${result.symbol}:daily`;
+        await this.cacheService.set(cacheKey, result, { ttl: 300 }); // 5 minutes
+      }
+    } catch (error) {
+      // Don't fail the request if caching fails
+      console.warn('Failed to cache result:', error);
+    }
+  }
+
+  /**
+   * Type guard for StockQuote
+   */
+  private isStockQuote(obj: any): obj is StockQuote {
+    return obj && typeof obj === 'object' && 'symbol' in obj && 'currentPrice' in obj;
+  }
+
+  /**
+   * Type guard for HistoricalData
+   */
+  private isHistoricalData(obj: any): obj is HistoricalData {
+    return obj && typeof obj === 'object' && 'symbol' in obj && 'data' in obj && Array.isArray(obj.data);
   }
 }
 

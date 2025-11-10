@@ -4,6 +4,19 @@ import { createMarketDataService } from '../services/MarketDataService';
 import { MarketDataRepository } from '../repositories/MarketDataRepository';
 import CacheService from '../services/CacheService';
 import { authenticateToken } from '../utils/auth';
+import { getTimeoutHandler } from '../middleware/timeoutHandler';
+
+/**
+ * NOTE: Timeout handling is automatically applied via global middleware in server.ts
+ * 
+ * Market data routes have a 6-second timeout configured (see ENDPOINT_TIMEOUT_CONFIGS)
+ * This shorter timeout is appropriate for external API calls that should respond quickly.
+ * 
+ * External API calls should use the timeout handler's wrapWithTimeout method to
+ * automatically fall back to cached data when timeouts occur.
+ * 
+ * See backend/src/middleware/TIMEOUT_USAGE_EXAMPLES.md for detailed examples
+ */
 
 const router = Router();
 const marketDataService = createMarketDataService();
@@ -401,5 +414,60 @@ router.get('/ws/info',
     }
   }
 );
+
+// Circuit breaker monitoring endpoint
+// Requirement: 5.5 - Add circuit breaker state monitoring
+router.get('/health/circuit-breaker',
+  authenticateToken,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const state = marketDataService.getCircuitBreakerState();
+      const stats = marketDataService.getCircuitBreakerStats();
+      
+      res.json({
+        data: {
+          serviceName: state.serviceName,
+          state: state.state,
+          isHealthy: state.state === 'CLOSED',
+          statistics: {
+            failureCount: stats.failureCount,
+            successCount: stats.successCount,
+            lastFailureTime: stats.lastFailureTime ? new Date(stats.lastFailureTime).toISOString() : null,
+            lastSuccessTime: stats.lastSuccessTime ? new Date(stats.lastSuccessTime).toISOString() : null,
+            nextAttemptTime: stats.nextAttemptTime ? new Date(stats.nextAttemptTime).toISOString() : null
+          },
+          details: {
+            consecutiveSuccesses: state.consecutiveSuccesses,
+            stateDescription: getCircuitStateDescription(state.state)
+          }
+        },
+        timestamp: new Date()
+      });
+    } catch (error) {
+      console.error('Error getting circuit breaker state:', error);
+      res.status(500).json({
+        error: {
+          code: 'CIRCUIT_BREAKER_ERROR',
+          message: 'Failed to get circuit breaker state',
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+);
+
+// Helper function to describe circuit state
+function getCircuitStateDescription(state: string): string {
+  switch (state) {
+    case 'CLOSED':
+      return 'Normal operation - requests are passing through';
+    case 'OPEN':
+      return 'Circuit is open - requests are failing fast with cached fallback';
+    case 'HALF_OPEN':
+      return 'Testing service recovery - allowing limited requests';
+    default:
+      return 'Unknown state';
+  }
+}
 
 export default router;

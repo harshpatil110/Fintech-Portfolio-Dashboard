@@ -20,6 +20,22 @@ import {
   sanitizeInput
 } from '../middleware/validation';
 import { portfolioLimiter, bulkOperationsLimiter } from '../middleware/rateLimiter';
+import { getTimeoutHandler } from '../middleware/timeoutHandler';
+import { PayloadValidator } from '../middleware/payloadValidator';
+
+/**
+ * NOTE: Timeout handling is automatically applied via global middleware in server.ts
+ * 
+ * Portfolio routes have an 8-second timeout configured (see ENDPOINT_TIMEOUT_CONFIGS)
+ * 
+ * To use timeout protection in routes:
+ * 1. Get timeout handler: const timeoutHandler = getTimeoutHandler(req);
+ * 2. Check remaining time: timeoutHandler?.getRemainingTime()
+ * 3. Check if approaching timeout: timeoutHandler?.isApproachingTimeout()
+ * 4. Wrap async operations: timeoutHandler?.wrapWithTimeout(fn, fallback)
+ * 
+ * See backend/src/middleware/TIMEOUT_USAGE_EXAMPLES.md for detailed examples
+ */
 
 const router = Router();
 const portfolioRepository = new PortfolioRepository();
@@ -37,6 +53,7 @@ try {
 /**
  * GET /api/portfolio/:userId
  * Retrieve complete portfolio with current market data and calculations
+ * Supports pagination via ?page=0&limit=100 query parameters
  */
 router.get('/:userId',
   portfolioLimiter,
@@ -58,6 +75,9 @@ router.get('/:userId',
         });
         return;
       }
+
+      // Get pagination parameters
+      const { page, limit } = PayloadValidator.getPaginationParams(req);
 
       // Get user's portfolios
       const portfolios = await portfolioRepository.findByUserId(requestedUserId);
@@ -154,19 +174,23 @@ router.get('/:userId',
         }));
       }
 
-      // Calculate portfolio totals
+      // Calculate portfolio totals (using all positions, not paginated)
       const totals = PortfolioCalculations.calculatePortfolioTotals(updatedPositions);
       
-      // Generate portfolio summary
+      // Generate portfolio summary (using all positions)
       const summary = PortfolioCalculations.generatePortfolioSummary(updatedPositions);
       
       // Calculate position allocations
       const positionsWithAllocations = PortfolioCalculations.calculatePositionAllocations(updatedPositions);
 
-      // Update portfolio with calculated values
+      // Apply pagination to positions
+      const validator = new PayloadValidator();
+      const paginatedPositions = validator.paginateResponse(positionsWithAllocations, page, limit);
+
+      // Update portfolio with calculated values and paginated positions
       const updatedPortfolio = {
         ...portfolio,
-        positions: positionsWithAllocations,
+        positions: paginatedPositions.data,
         totalValue: totals.totalValue,
         totalGainLoss: totals.totalGainLoss,
         totalGainLossPercent: totals.totalGainLossPercent
@@ -183,7 +207,8 @@ router.get('/:userId',
             totalGainLoss: totals.totalGainLoss,
             totalGainLossPercent: totals.totalGainLossPercent,
             positionCount: updatedPositions.length
-          }
+          },
+          pagination: paginatedPositions.pagination
         },
         timestamp: new Date()
       });
@@ -519,6 +544,7 @@ router.delete('/position/:id',
 /**
  * GET /api/portfolio/:userId/history
  * Get transaction history for user's portfolio
+ * Supports pagination via ?page=0&limit=100 query parameters
  */
 router.get('/:userId/history',
   authenticateToken,
@@ -526,7 +552,6 @@ router.get('/:userId/history',
     try {
       const requestedUserId = req.params.userId;
       const authenticatedUserId = req.user!.userId;
-      const limit = parseInt(req.query.limit as string) || 50;
 
       // Ensure users can only access their own transaction history
       if (requestedUserId !== authenticatedUserId) {
@@ -540,6 +565,10 @@ router.get('/:userId/history',
         return;
       }
 
+      // Get pagination parameters (default limit to 50 for history)
+      const { page, limit: requestedLimit } = PayloadValidator.getPaginationParams(req);
+      const limit = requestedLimit || 50;
+
       // Get user's portfolios
       const portfolios = await portfolioRepository.findByUserId(requestedUserId);
       
@@ -547,6 +576,14 @@ router.get('/:userId/history',
         res.json({
           message: 'Transaction history retrieved successfully',
           data: [],
+          pagination: {
+            page: 0,
+            limit,
+            total: 0,
+            totalPages: 0,
+            hasMore: false,
+            hasPrevious: false
+          },
           timestamp: new Date()
         });
         return;
@@ -558,15 +595,30 @@ router.get('/:userId/history',
         res.json({
           message: 'Transaction history retrieved successfully',
           data: [],
+          pagination: {
+            page: 0,
+            limit,
+            total: 0,
+            totalPages: 0,
+            hasMore: false,
+            hasPrevious: false
+          },
           timestamp: new Date()
         });
         return;
       }
-      const history = await portfolioRepository.getTransactionHistory(portfolio.id, limit);
+      
+      // Get all history first to properly paginate
+      const allHistory = await portfolioRepository.getTransactionHistory(portfolio.id, 10000); // Get large set
+      
+      // Apply pagination
+      const validator = new PayloadValidator();
+      const paginatedResult = validator.paginateResponse(allHistory, page, limit);
 
       res.json({
         message: 'Transaction history retrieved successfully',
-        data: history,
+        data: paginatedResult.data,
+        pagination: paginatedResult.pagination,
         timestamp: new Date()
       });
 
@@ -586,6 +638,7 @@ router.get('/:userId/history',
 /**
  * GET /api/portfolio/:userId/positions/filtered
  * Get filtered and sorted positions
+ * Supports pagination via ?page=0&limit=100 query parameters
  */
 router.get('/:userId/positions/filtered',
   authenticateToken,
@@ -605,6 +658,9 @@ router.get('/:userId/positions/filtered',
         });
         return;
       }
+
+      // Get pagination parameters
+      const { page, limit } = PayloadValidator.getPaginationParams(req);
 
       // Parse filters from query parameters
       const filters: PortfolioFilters = {};
@@ -638,6 +694,14 @@ router.get('/:userId/positions/filtered',
         res.json({
           message: 'Filtered positions retrieved successfully',
           data: [],
+          pagination: {
+            page: 0,
+            limit,
+            total: 0,
+            totalPages: 0,
+            hasMore: false,
+            hasPrevious: false
+          },
           timestamp: new Date()
         });
         return;
@@ -649,6 +713,14 @@ router.get('/:userId/positions/filtered',
         res.json({
           message: 'Filtered positions retrieved successfully',
           data: [],
+          pagination: {
+            page: 0,
+            limit,
+            total: 0,
+            totalPages: 0,
+            hasMore: false,
+            hasPrevious: false
+          },
           timestamp: new Date()
         });
         return;
@@ -693,9 +765,14 @@ router.get('/:userId/positions/filtered',
         }
       }
 
+      // Apply pagination
+      const validator = new PayloadValidator();
+      const paginatedResult = validator.paginateResponse(filteredPositions, page, limit);
+
       res.json({
         message: 'Filtered positions retrieved successfully',
-        data: filteredPositions,
+        data: paginatedResult.data,
+        pagination: paginatedResult.pagination,
         timestamp: new Date()
       });
 

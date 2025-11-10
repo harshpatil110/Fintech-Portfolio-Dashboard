@@ -15,6 +15,7 @@ import {
   getCsrfToken
 } from './middleware/security';
 import { generalLimiter } from './middleware/rateLimiter';
+import { initializeErrorHandling, applyErrorHandlingMiddleware } from './config/initializeErrorHandling';
 
 // Load environment variables
 dotenv.config();
@@ -52,8 +53,11 @@ app.use(requestLogger);
 app.use(generalLimiter);
 
 // Body parsing middleware with size limits
-app.use(express.json({ limit: '1mb' })); // Reduced from 10mb for security
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({ limit: '4mb' })); // Vercel limit
+app.use(express.urlencoded({ extended: true, limit: '4mb' }));
+
+// Initialize error handling infrastructure (must be early in middleware chain)
+// This will be called in initializeServices() to ensure async setup
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -71,20 +75,9 @@ app.get('/api/csrf-token', getCsrfToken);
 // API routes
 app.use('/api', apiRoutes);
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ 
-    error: {
-      code: 'ROUTE_NOT_FOUND',
-      message: 'The requested route does not exist',
-      path: req.originalUrl,
-      timestamp: new Date()
-    }
-  });
-});
-
-// Error handling middleware (must be last)
-app.use(errorHandler);
+// Apply error handling middleware (404 and global error handler)
+// This must be after all routes
+applyErrorHandlingMiddleware(app);
 
 // Initialize WebSocket service
 let webSocketService: WebSocketService;
@@ -92,15 +85,8 @@ let webSocketService: WebSocketService;
 // Initialize services
 async function initializeServices() {
   try {
-    // Conditionally connect to Redis (set SKIP_REDIS=true to skip in dev)
-    if (process.env.SKIP_REDIS === 'true') {
-      console.log('⚠️ SKIP_REDIS=true — skipping Redis connection');
-    } else {
-      // Connect to Redis
-      if (!redisClient.isOpen) {
-        await redisClient.connect();
-      }
-    }
+    // Initialize error handling infrastructure (Redis, middleware, etc.)
+    await initializeErrorHandling(app);
 
     // Initialize WebSocket service
     webSocketService = new WebSocketService(server);
@@ -112,7 +98,7 @@ async function initializeServices() {
     if (process.env.NODE_ENV === 'production') {
       process.exit(1);
     } else {
-      console.warn('Continuing without all services in non-production environment');
+      console.warn('⚠️  Continuing without all services in non-production environment');
     }
   }
 }
