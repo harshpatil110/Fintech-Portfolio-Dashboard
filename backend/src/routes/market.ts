@@ -6,6 +6,7 @@ import CacheService from '../services/CacheService';
 import { authenticateToken } from '../utils/auth';
 import { getTimeoutHandler } from '../middleware/timeoutHandler';
 import { getRetryStats } from '../middleware/retryMiddleware';
+import { marketDataCache } from '../utils/cacheManager';
 
 /**
  * NOTE: Timeout handling is automatically applied via global middleware in server.ts
@@ -70,6 +71,7 @@ const handleValidationErrors = (req: Request, res: Response, next: Function) => 
 };
 
 // Get current stock quote
+// Requirement 9.1: Cache market data responses for 60 seconds
 router.get('/quote/:symbol', 
   authenticateToken,
   validateSymbol,
@@ -89,44 +91,28 @@ router.get('/quote/:symbol',
       }
       const upperSymbol = symbol.toUpperCase();
 
-      // Try to get from Redis cache first
-      let cachedQuote = await CacheService.getCachedQuote(upperSymbol);
-      
-      // Check if cached data is stale (older than 15 minutes during market hours)
-      const isStale = cachedQuote && 
-        (Date.now() - new Date(cachedQuote.cachedAt).getTime()) > 15 * 60 * 1000;
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.1: 60s TTL for market data
+      // Requirement 9.3: Implement stale-while-revalidate caching pattern
+      const quote = await marketDataCache.get(
+        `quote:${upperSymbol}`,
+        async () => {
+          const freshQuote = await marketDataService.getQuote(upperSymbol);
+          // Also cache in database for long-term storage
+          await marketDataRepository.cacheQuote(freshQuote);
+          return freshQuote;
+        },
+        { ttl: 60, staleWhileRevalidate: 30 }
+      );
 
-      if (!cachedQuote || isStale) {
-        try {
-          // Fetch fresh data from API
-          const quote = await marketDataService.getQuote(upperSymbol);
-          
-          // Cache in both Redis and database
-          await CacheService.cacheQuote(upperSymbol, quote, 900); // 15 minutes TTL
-          await marketDataRepository.cacheQuote(quote);
-          
-          cachedQuote = { ...quote, cachedAt: new Date().toISOString() };
-        } catch (apiError) {
-          // If API fails and we have stale cache, return it with warning
-          if (cachedQuote) {
-            res.json({
-              data: cachedQuote,
-              timestamp: new Date(),
-              source: 'cache',
-              isStale: true,
-              warning: 'Using cached data due to API unavailability'
-            });
-            return;
-          }
-          throw apiError;
-        }
-      }
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
 
       res.json({
-        data: cachedQuote,
+        data: quote,
         timestamp: new Date(),
-        source: isStale ? 'api' : 'cache',
-        isStale: false
+        source: 'cache'
       });
 
     } catch (error) {
@@ -143,6 +129,7 @@ router.get('/quote/:symbol',
 );
 
 // Get multiple stock quotes
+// Requirement 9.1: Cache market data responses for 60 seconds
 router.post('/quotes',
   authenticateToken,
   validateSymbols,
@@ -152,47 +139,35 @@ router.post('/quotes',
       const { symbols } = req.body;
       const upperSymbols = symbols.map((s: string) => s.toUpperCase());
 
-      // Get cached quotes from Redis
-      const cachedQuotesMap = await CacheService.getCachedBatchQuotes(upperSymbols);
-      
-      // Find symbols that need fresh data
-      const staleSymbols = upperSymbols.filter((symbol: string) => {
-        const cached = cachedQuotesMap.get(symbol);
-        if (!cached) return true;
-        
-        const isStale = (Date.now() - new Date(cached.cachedAt).getTime()) > 15 * 60 * 1000;
-        return isStale;
-      });
-
-      // Fetch fresh data for stale symbols
-      const allQuotes = Array.from(cachedQuotesMap.values());
-      
-      if (staleSymbols.length > 0) {
-        try {
-          const apiQuotes = await marketDataService.getBatchQuotes(staleSymbols);
-          
-          // Cache the fresh data in both Redis and database
-          await CacheService.cacheBatchQuotes(apiQuotes, 900);
-          for (const quote of apiQuotes) {
+      // Fetch quotes for all symbols using CacheManager
+      // Each symbol is cached individually with stale-while-revalidate
+      const quotePromises = upperSymbols.map((symbol: string) =>
+        marketDataCache.get(
+          `quote:${symbol}`,
+          async () => {
+            const quote = await marketDataService.getQuote(symbol);
             await marketDataRepository.cacheQuote(quote);
-            allQuotes.push({ ...quote, cachedAt: new Date().toISOString() });
-          }
-        } catch (apiError) {
-          console.warn('Batch API request failed, using cached data:', apiError);
-        }
-      }
-
-      // Remove duplicates (prefer fresh data over cached)
-      const uniqueQuotes = allQuotes.filter((quote, index, self) => 
-        index === self.findIndex(q => q.symbol === quote.symbol)
+            return quote;
+          },
+          { ttl: 60, staleWhileRevalidate: 30 }
+        ).catch(error => {
+          console.error(`Failed to fetch quote for ${symbol}:`, error);
+          return null;
+        })
       );
 
+      const quotes = (await Promise.all(quotePromises)).filter(q => q !== null);
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+
       res.json({
-        data: uniqueQuotes,
+        data: quotes,
         timestamp: new Date(),
-        source: 'mixed',
+        source: 'cache',
         requestedSymbols: upperSymbols.length,
-        returnedSymbols: uniqueQuotes.length
+        returnedSymbols: quotes.length
       });
 
     } catch (error) {
@@ -209,6 +184,7 @@ router.post('/quotes',
 );
 
 // Search for stocks
+// Requirement 9.1: Cache market data responses for 60 seconds
 router.get('/search',
   authenticateToken,
   validateSearchQuery,
@@ -217,12 +193,23 @@ router.get('/search',
     try {
       const { q: query } = req.query as { q: string };
       
-      const results = await marketDataService.searchSymbols(query);
+      // Use CacheManager with stale-while-revalidate pattern
+      // Cache search results to reduce API calls for common searches
+      const results = await marketDataCache.get(
+        `search:${query.toLowerCase()}`,
+        async () => await marketDataService.searchSymbols(query),
+        { ttl: 60, staleWhileRevalidate: 30 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
       
       res.json({
         data: results,
         timestamp: new Date(),
-        query: query
+        query: query,
+        source: 'cache'
       });
 
     } catch (error) {
@@ -239,6 +226,7 @@ router.get('/search',
 );
 
 // Get historical data
+// Requirement 9.1: Cache market data responses for 60 seconds
 router.get('/history/:symbol',
   authenticateToken,
   validateSymbol,
@@ -258,13 +246,25 @@ router.get('/history/:symbol',
         return;
       }
       const { period = 'daily' } = req.query as { period?: string };
+      const upperSymbol = symbol.toUpperCase();
       
-      const historicalData = await marketDataService.getHistoricalData(symbol.toUpperCase(), period);
+      // Use CacheManager with stale-while-revalidate pattern
+      // Historical data changes less frequently, so caching is beneficial
+      const historicalData = await marketDataCache.get(
+        `history:${upperSymbol}:${period}`,
+        async () => await marketDataService.getHistoricalData(upperSymbol, period),
+        { ttl: 60, staleWhileRevalidate: 30 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
       
       res.json({
         data: historicalData,
         timestamp: new Date(),
-        period: period
+        period: period,
+        source: 'cache'
       });
 
     } catch (error) {
@@ -281,6 +281,7 @@ router.get('/history/:symbol',
 );
 
 // Validate stock symbol
+// Requirement 9.1: Cache market data responses for 60 seconds
 router.get('/validate/:symbol',
   authenticateToken,
   validateSymbol,
@@ -298,15 +299,26 @@ router.get('/validate/:symbol',
         });
         return;
       }
+      const upperSymbol = symbol.toUpperCase();
       
-      const isValid = await marketDataService.validateSymbol(symbol.toUpperCase());
+      // Use CacheManager - symbol validation results rarely change
+      const validationResult = await marketDataCache.get(
+        `validate:${upperSymbol}`,
+        async () => {
+          const isValid = await marketDataService.validateSymbol(upperSymbol);
+          return { symbol: upperSymbol, isValid };
+        },
+        { ttl: 60, staleWhileRevalidate: 30 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
       
       res.json({
-        data: {
-          symbol: symbol.toUpperCase(),
-          isValid: isValid
-        },
-        timestamp: new Date()
+        data: validationResult,
+        timestamp: new Date(),
+        source: 'cache'
       });
 
     } catch (error) {
@@ -323,31 +335,34 @@ router.get('/validate/:symbol',
 );
 
 // Get market status
+// Requirement 9.1: Cache market data responses for 60 seconds
 router.get('/status',
   authenticateToken,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      // Try to get cached market status first
-      let cachedStatus = await CacheService.getCachedMarketStatus();
-      
-      if (!cachedStatus) {
-        // Get a sample quote to determine market status
-        // Using a major index like SPY as it's always available
-        const quote = await marketDataService.getQuote('SPY');
-        
-        // Cache the market status
-        await CacheService.cacheMarketStatus(quote.marketStatus, 300); // 5 minutes TTL
-        
-        cachedStatus = {
-          status: quote.marketStatus,
-          timestamp: quote.timestamp.toISOString()
-        };
-      }
+      // Use CacheManager with stale-while-revalidate pattern
+      const marketStatus = await marketDataCache.get(
+        'market:status',
+        async () => {
+          // Get a sample quote to determine market status
+          // Using a major index like SPY as it's always available
+          const quote = await marketDataService.getQuote('SPY');
+          return {
+            status: quote.marketStatus,
+            timestamp: quote.timestamp.toISOString()
+          };
+        },
+        { ttl: 60, staleWhileRevalidate: 30 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
       
       res.json({
         data: {
-          marketStatus: cachedStatus.status,
-          timestamp: cachedStatus.timestamp
+          marketStatus: marketStatus.status,
+          timestamp: marketStatus.timestamp
         },
         timestamp: new Date(),
         source: 'cache'

@@ -267,7 +267,7 @@ export function retryStatsMiddleware() {
     const endpointType = (req as any).endpointType || 'default';
     const stats = retryStatsTracker.getStats(endpointType);
     
-    if (stats) {
+    if (stats && typeof stats === 'object' && 'totalRequests' in stats) {
       res.setHeader('X-Retry-Stats-Total', stats.totalRequests.toString());
       res.setHeader('X-Retry-Stats-Retried', stats.retriedRequests.toString());
       res.setHeader('X-Retry-Stats-Success-Rate', 

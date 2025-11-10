@@ -4,3 +4,4 @@ export * from './errorHandler';
 export * from './circuitBreaker';
 export * from './retryHandler';
 export * from './rateLimiter';
+export * from './cacheManager';

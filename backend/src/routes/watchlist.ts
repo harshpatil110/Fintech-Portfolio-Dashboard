@@ -13,6 +13,7 @@ import {
   sanitizeInput
 } from '../middleware/validation';
 import { watchlistLimiter, bulkOperationsLimiter } from '../middleware/rateLimiter';
+import { CacheManager } from '../utils/cacheManager';
 
 const router = Router();
 const watchlistRepository = new WatchlistRepository();
@@ -24,6 +25,10 @@ try {
 } catch (error) {
   console.error('Failed to initialize market data service:', error);
 }
+
+// Watchlist cache: 30s TTL with 15s stale-while-revalidate
+// Requirement 9.2: Cache portfolio calculations for 30 seconds (watchlist is similar to portfolio data)
+const watchlistCache = new CacheManager('watchlist:');
 
 /**
  * Validation rules for adding a stock to watchlist
@@ -37,6 +42,7 @@ const validateAddToWatchlist = [
 /**
  * GET /api/watchlist/:userId
  * Retrieve user's complete watchlist with current market data, sorting, and filtering
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId',
   watchlistLimiter,
@@ -70,163 +76,173 @@ router.get('/:userId',
         losersOnly = 'false'
       } = req.query;
 
-      // Get user's watchlist
-      const watchlistItems = await watchlistRepository.findByUserId(requestedUserId);
-      
-      if (watchlistItems.length === 0) {
-        res.json({
-          message: 'Watchlist retrieved successfully',
-          data: {
-            items: [],
-            summary: {
-              totalItems: 0,
-              itemsWithAlerts: 0,
-              triggeredAlerts: []
-            }
-          },
-          timestamp: new Date()
-        });
-        return;
-      }
+      // Create cache key based on query parameters
+      const queryKey = JSON.stringify({ sortBy, sortOrder, filterBy, filterValue, alertsOnly, gainersOnly, losersOnly });
 
-      // Get current market data for all watchlist items
-      const symbols = watchlistItems.map(item => item.symbol);
-      let updatedItems = [...watchlistItems];
-      
-      if (marketDataService) {
-        try {
-          const quotes = await marketDataService.getBatchQuotes(symbols);
-          const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for watchlist data
+      const watchlistData = await watchlistCache.get(
+        `user:${requestedUserId}:list:${queryKey}`,
+        async () => {
+          // Get user's watchlist
+          const watchlistItems = await watchlistRepository.findByUserId(requestedUserId);
           
-          // Update watchlist items with current market data
-          updatedItems = watchlistItems.map(item => {
-            const quote = quoteMap.get(item.symbol);
-            if (quote) {
-              return {
-                ...item,
-                currentPrice: quote.currentPrice,
-                change: quote.change,
-                changePercent: quote.changePercent
-              };
-            }
-            return item;
-          });
-        } catch (marketDataError) {
-          console.error('Failed to fetch market data for watchlist:', marketDataError);
-          // Continue with watchlist items without current market data
-        }
-      }
-
-      // Apply filters
-      let filteredItems = updatedItems;
-
-      // Filter by alerts only
-      if (alertsOnly === 'true') {
-        filteredItems = filteredItems.filter(item => item.alertPrice !== undefined);
-      }
-
-      // Filter by gainers only
-      if (gainersOnly === 'true') {
-        filteredItems = filteredItems.filter(item => 
-          item.changePercent !== undefined && item.changePercent > 0
-        );
-      }
-
-      // Filter by losers only
-      if (losersOnly === 'true') {
-        filteredItems = filteredItems.filter(item => 
-          item.changePercent !== undefined && item.changePercent < 0
-        );
-      }
-
-      // Apply custom filter
-      if (filterBy && filterValue) {
-        const filterVal = String(filterValue).toLowerCase();
-        filteredItems = filteredItems.filter(item => {
-          switch (filterBy) {
-            case 'symbol':
-              return item.symbol.toLowerCase().includes(filterVal);
-            case 'companyName':
-              return item.companyName.toLowerCase().includes(filterVal);
-            default:
-              return true;
+          if (watchlistItems.length === 0) {
+            return {
+              items: [],
+              summary: {
+                totalItems: 0,
+                filteredItems: 0,
+                itemsWithAlerts: 0,
+                triggeredAlerts: []
+              }
+            };
           }
-        });
-      }
 
-      // Apply sorting
-      filteredItems.sort((a, b) => {
-        let aValue: any;
-        let bValue: any;
+          // Get current market data for all watchlist items
+          const symbols = watchlistItems.map(item => item.symbol);
+          let updatedItems = [...watchlistItems];
+          
+          if (marketDataService) {
+            try {
+              const quotes = await marketDataService.getBatchQuotes(symbols);
+              const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+              
+              // Update watchlist items with current market data
+              updatedItems = watchlistItems.map(item => {
+                const quote = quoteMap.get(item.symbol);
+                if (quote) {
+                  return {
+                    ...item,
+                    currentPrice: quote.currentPrice,
+                    change: quote.change,
+                    changePercent: quote.changePercent
+                  };
+                }
+                return item;
+              });
+            } catch (marketDataError) {
+              console.error('Failed to fetch market data for watchlist:', marketDataError);
+              // Continue with watchlist items without current market data
+            }
+          }
 
-        switch (sortBy) {
-          case 'symbol':
-            aValue = a.symbol;
-            bValue = b.symbol;
-            break;
-          case 'companyName':
-            aValue = a.companyName;
-            bValue = b.companyName;
-            break;
-          case 'currentPrice':
-            aValue = a.currentPrice || 0;
-            bValue = b.currentPrice || 0;
-            break;
-          case 'change':
-            aValue = a.change || 0;
-            bValue = b.change || 0;
-            break;
-          case 'changePercent':
-            aValue = a.changePercent || 0;
-            bValue = b.changePercent || 0;
-            break;
-          case 'alertPrice':
-            aValue = a.alertPrice || 0;
-            bValue = b.alertPrice || 0;
-            break;
-          case 'addedAt':
-          default:
-            aValue = new Date(a.addedAt).getTime();
-            bValue = new Date(b.addedAt).getTime();
-            break;
-        }
+          // Apply filters
+          let filteredItems = updatedItems;
 
-        if (typeof aValue === 'string') {
-          aValue = aValue.toLowerCase();
-          bValue = bValue.toLowerCase();
-        }
+          // Filter by alerts only
+          if (alertsOnly === 'true') {
+            filteredItems = filteredItems.filter(item => item.alertPrice !== undefined);
+          }
 
-        let comparison = 0;
-        if (aValue < bValue) {
-          comparison = -1;
-        } else if (aValue > bValue) {
-          comparison = 1;
-        }
+          // Filter by gainers only
+          if (gainersOnly === 'true') {
+            filteredItems = filteredItems.filter(item => 
+              item.changePercent !== undefined && item.changePercent > 0
+            );
+          }
 
-        return sortOrder === 'desc' ? -comparison : comparison;
-      });
+          // Filter by losers only
+          if (losersOnly === 'true') {
+            filteredItems = filteredItems.filter(item => 
+              item.changePercent !== undefined && item.changePercent < 0
+            );
+          }
 
-      // Calculate summary
-      const itemsWithAlerts = updatedItems.filter(item => item.alertPrice !== undefined);
-      const triggeredAlerts = updatedItems.filter(item => 
-        item.alertPrice !== undefined && 
-        item.currentPrice !== undefined && 
-        item.currentPrice <= item.alertPrice
+          // Apply custom filter
+          if (filterBy && filterValue) {
+            const filterVal = String(filterValue).toLowerCase();
+            filteredItems = filteredItems.filter(item => {
+              switch (filterBy) {
+                case 'symbol':
+                  return item.symbol.toLowerCase().includes(filterVal);
+                case 'companyName':
+                  return item.companyName.toLowerCase().includes(filterVal);
+                default:
+                  return true;
+              }
+            });
+          }
+
+          // Apply sorting
+          filteredItems.sort((a, b) => {
+            let aValue: any;
+            let bValue: any;
+
+            switch (sortBy) {
+              case 'symbol':
+                aValue = a.symbol;
+                bValue = b.symbol;
+                break;
+              case 'companyName':
+                aValue = a.companyName;
+                bValue = b.companyName;
+                break;
+              case 'currentPrice':
+                aValue = a.currentPrice || 0;
+                bValue = b.currentPrice || 0;
+                break;
+              case 'change':
+                aValue = a.change || 0;
+                bValue = b.change || 0;
+                break;
+              case 'changePercent':
+                aValue = a.changePercent || 0;
+                bValue = b.changePercent || 0;
+                break;
+              case 'alertPrice':
+                aValue = a.alertPrice || 0;
+                bValue = b.alertPrice || 0;
+                break;
+              case 'addedAt':
+              default:
+                aValue = new Date(a.addedAt).getTime();
+                bValue = new Date(b.addedAt).getTime();
+                break;
+            }
+
+            if (typeof aValue === 'string') {
+              aValue = aValue.toLowerCase();
+              bValue = bValue.toLowerCase();
+            }
+
+            let comparison = 0;
+            if (aValue < bValue) {
+              comparison = -1;
+            } else if (aValue > bValue) {
+              comparison = 1;
+            }
+
+            return sortOrder === 'desc' ? -comparison : comparison;
+          });
+
+          // Calculate summary
+          const itemsWithAlerts = updatedItems.filter(item => item.alertPrice !== undefined);
+          const triggeredAlerts = updatedItems.filter(item => 
+            item.alertPrice !== undefined && 
+            item.currentPrice !== undefined && 
+            item.currentPrice <= item.alertPrice
+          );
+
+          return {
+            items: filteredItems,
+            summary: {
+              totalItems: updatedItems.length,
+              filteredItems: filteredItems.length,
+              itemsWithAlerts: itemsWithAlerts.length,
+              triggeredAlerts
+            }
+          };
+        },
+        { ttl: 30, staleWhileRevalidate: 15 }
       );
 
-      const summary = {
-        totalItems: updatedItems.length,
-        filteredItems: filteredItems.length,
-        itemsWithAlerts: itemsWithAlerts.length,
-        triggeredAlerts
-      };
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Watchlist retrieved successfully',
-        data: {
-          items: filteredItems,
-          summary
-        },
+        data: watchlistData,
         timestamp: new Date()
       });
 
@@ -284,6 +300,10 @@ router.post('/',
         companyName,
         alertPrice: alertPrice ? parseFloat(alertPrice) : undefined
       });
+
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached watchlist data for this user
+      await watchlistCache.invalidatePattern(`user:${userId}:*`);
 
       res.status(201).json({
         message: 'Stock added to watchlist successfully',
@@ -393,6 +413,10 @@ router.delete('/:userId/:symbol',
         return;
       }
 
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached watchlist data for this user
+      await watchlistCache.invalidatePattern(`user:${requestedUserId}:*`);
+
       res.json({
         message: 'Stock removed from watchlist successfully',
         data: {
@@ -466,6 +490,10 @@ router.delete('/:userId',
         });
         return;
       }
+
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached watchlist data for this user
+      await watchlistCache.invalidatePattern(`user:${requestedUserId}:*`);
 
       res.json({
         message: 'Watchlist cleared successfully',
@@ -559,6 +587,10 @@ router.put('/:userId/:symbol',
         });
         return;
       }
+
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached watchlist data for this user
+      await watchlistCache.invalidatePattern(`user:${requestedUserId}:*`);
 
       res.json({
         message: 'Watchlist item updated successfully',
@@ -662,6 +694,12 @@ router.post('/bulk',
         }
       }
 
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached watchlist data for this user if any items were added
+      if (results.added.length > 0) {
+        await watchlistCache.invalidatePattern(`user:${userId}:*`);
+      }
+
       res.status(201).json({
         message: 'Bulk watchlist operation completed',
         data: {
@@ -692,6 +730,7 @@ router.post('/bulk',
 /**
  * GET /api/watchlist/:userId/summary
  * Get watchlist summary and statistics
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId/summary',
   authenticateToken,
@@ -712,47 +751,58 @@ router.get('/:userId/summary',
         return;
       }
 
-      // Get watchlist items
-      const watchlistItems = await watchlistRepository.findByUserId(requestedUserId);
-      const itemsWithAlerts = await watchlistRepository.findItemsWithAlerts(requestedUserId);
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for watchlist data
+      const summaryData = await watchlistCache.get(
+        `user:${requestedUserId}:summary`,
+        async () => {
+          // Get watchlist items
+          const watchlistItems = await watchlistRepository.findByUserId(requestedUserId);
+          const itemsWithAlerts = await watchlistRepository.findItemsWithAlerts(requestedUserId);
 
-      // Get current market data for triggered alerts
-      let triggeredAlerts: any[] = [];
-      
-      if (marketDataService && itemsWithAlerts.length > 0) {
-        try {
-          const symbols = itemsWithAlerts.map(item => item.symbol);
-          const quotes = await marketDataService.getBatchQuotes(symbols);
-          const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+          // Get current market data for triggered alerts
+          let triggeredAlerts: any[] = [];
           
-          triggeredAlerts = itemsWithAlerts.filter(item => {
-            const quote = quoteMap.get(item.symbol);
-            return quote && item.alertPrice && quote.currentPrice <= item.alertPrice;
-          }).map(item => {
-            const quote = quoteMap.get(item.symbol);
-            return {
-              ...item,
-              currentPrice: quote?.currentPrice,
-              change: quote?.change,
-              changePercent: quote?.changePercent
-            };
-          });
-        } catch (marketDataError) {
-          console.error('Failed to fetch market data for alerts:', marketDataError);
-        }
-      }
+          if (marketDataService && itemsWithAlerts.length > 0) {
+            try {
+              const symbols = itemsWithAlerts.map(item => item.symbol);
+              const quotes = await marketDataService.getBatchQuotes(symbols);
+              const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+              
+              triggeredAlerts = itemsWithAlerts.filter(item => {
+                const quote = quoteMap.get(item.symbol);
+                return quote && item.alertPrice && quote.currentPrice <= item.alertPrice;
+              }).map(item => {
+                const quote = quoteMap.get(item.symbol);
+                return {
+                  ...item,
+                  currentPrice: quote?.currentPrice,
+                  change: quote?.change,
+                  changePercent: quote?.changePercent
+                };
+              });
+            } catch (marketDataError) {
+              console.error('Failed to fetch market data for alerts:', marketDataError);
+            }
+          }
 
-      const summary = {
-        totalItems: watchlistItems.length,
-        itemsWithAlerts: itemsWithAlerts.length,
-        triggeredAlerts: triggeredAlerts.length,
-        remainingSlots: 50 - watchlistItems.length,
-        alerts: triggeredAlerts
-      };
+          return {
+            totalItems: watchlistItems.length,
+            itemsWithAlerts: itemsWithAlerts.length,
+            triggeredAlerts: triggeredAlerts.length,
+            remainingSlots: 50 - watchlistItems.length,
+            alerts: triggeredAlerts
+          };
+        },
+        { ttl: 30, staleWhileRevalidate: 15 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Watchlist summary retrieved successfully',
-        data: summary,
+        data: summaryData,
         timestamp: new Date()
       });
 

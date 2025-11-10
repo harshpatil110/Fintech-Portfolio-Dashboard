@@ -22,6 +22,7 @@ import {
 import { portfolioLimiter, bulkOperationsLimiter } from '../middleware/rateLimiter';
 import { getTimeoutHandler } from '../middleware/timeoutHandler';
 import { PayloadValidator } from '../middleware/payloadValidator';
+import { portfolioCache, marketDataCache } from '../utils/cacheManager';
 
 /**
  * NOTE: Timeout handling is automatically applied via global middleware in server.ts
@@ -54,6 +55,7 @@ try {
  * GET /api/portfolio/:userId
  * Retrieve complete portfolio with current market data and calculations
  * Supports pagination via ?page=0&limit=100 query parameters
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId',
   portfolioLimiter,
@@ -79,137 +81,171 @@ router.get('/:userId',
       // Get pagination parameters
       const { page, limit } = PayloadValidator.getPaginationParams(req);
 
-      // Get user's portfolios
-      const portfolios = await portfolioRepository.findByUserId(requestedUserId);
-      
-      if (portfolios.length === 0) {
-        res.json({
-          message: 'Portfolio retrieved successfully',
-          data: {
-            portfolio: null,
-            summary: {
-              totalValue: 0,
-              totalGainLoss: 0,
-              totalGainLossPercent: 0,
-              positionCount: 0,
-              topPerformers: [],
-              worstPerformers: []
-            }
-          },
-          timestamp: new Date()
-        });
-        return;
-      }
-
-      // Use the first portfolio (default portfolio)
-      const portfolio = portfolios[0];
-      
-      if (!portfolio || !portfolio.positions || portfolio.positions.length === 0) {
-        res.json({
-          message: 'Portfolio retrieved successfully',
-          data: {
-            portfolio: {
-              ...portfolio,
-              totalValue: 0,
-              totalGainLoss: 0,
-              totalGainLossPercent: 0
-            },
-            summary: {
-              totalValue: 0,
-              totalGainLoss: 0,
-              totalGainLossPercent: 0,
-              positionCount: 0,
-              topPerformers: [],
-              worstPerformers: []
-            }
-          },
-          timestamp: new Date()
-        });
-        return;
-      }
-
-      // Get current market data for all positions
-      const symbols = portfolio.positions!.map(pos => pos.symbol);
-      let updatedPositions: StockPosition[] = [];
-      
-      if (marketDataService) {
-        try {
-          const quotes = await marketDataService.getBatchQuotes(symbols);
-          const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for portfolio data
+      // Requirement 9.3: Implement stale-while-revalidate caching pattern
+      const portfolioData = await portfolioCache.get(
+        `user:${requestedUserId}:portfolio:page:${page}:limit:${limit}`,
+        async () => {
+          // Get user's portfolios
+          const portfolios = await portfolioRepository.findByUserId(requestedUserId);
           
-          // Update positions with current market data
-          updatedPositions = portfolio.positions!.map(position => {
-            const quote = quoteMap.get(position.symbol);
-            if (quote) {
-              return PortfolioCalculations.updatePositionWithMarketData(position, quote);
-            }
-            // If no market data available, return position with calculated values based on average cost
+          if (portfolios.length === 0) {
             return {
+              portfolio: null,
+              summary: {
+                totalValue: 0,
+                totalGainLoss: 0,
+                totalGainLossPercent: 0,
+                positionCount: 0,
+                topPerformers: [],
+                worstPerformers: []
+              },
+              performance: {
+                totalValue: 0,
+                totalCostBasis: 0,
+                totalGainLoss: 0,
+                totalGainLossPercent: 0,
+                positionCount: 0
+              },
+              pagination: {
+                page: 0,
+                limit,
+                total: 0,
+                totalPages: 0,
+                hasMore: false,
+                hasPrevious: false
+              }
+            };
+          }
+
+          // Use the first portfolio (default portfolio)
+          const portfolio = portfolios[0];
+          
+          if (!portfolio || !portfolio.positions || portfolio.positions.length === 0) {
+            return {
+              portfolio: {
+                ...portfolio,
+                totalValue: 0,
+                totalGainLoss: 0,
+                totalGainLossPercent: 0
+              },
+              summary: {
+                totalValue: 0,
+                totalGainLoss: 0,
+                totalGainLossPercent: 0,
+                positionCount: 0,
+                topPerformers: [],
+                worstPerformers: []
+              },
+              performance: {
+                totalValue: 0,
+                totalCostBasis: 0,
+                totalGainLoss: 0,
+                totalGainLossPercent: 0,
+                positionCount: 0
+              },
+              pagination: {
+                page: 0,
+                limit,
+                total: 0,
+                totalPages: 0,
+                hasMore: false,
+                hasPrevious: false
+              }
+            };
+          }
+
+          // Get current market data for all positions
+          const symbols = portfolio.positions!.map(pos => pos.symbol);
+          let updatedPositions: StockPosition[] = [];
+          
+          if (marketDataService) {
+            try {
+              const quotes = await marketDataService.getBatchQuotes(symbols);
+              const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+              
+              // Update positions with current market data
+              updatedPositions = portfolio.positions!.map(position => {
+                const quote = quoteMap.get(position.symbol);
+                if (quote) {
+                  return PortfolioCalculations.updatePositionWithMarketData(position, quote);
+                }
+                // If no market data available, return position with calculated values based on average cost
+                return {
+                  ...position,
+                  currentPrice: position.averageCost,
+                  marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
+                  gainLoss: 0,
+                  gainLossPercent: 0
+                };
+              });
+            } catch (marketDataError) {
+              console.error('Failed to fetch market data:', marketDataError);
+              // Fallback: use average cost as current price
+              updatedPositions = portfolio.positions!.map(position => ({
+                ...position,
+                currentPrice: position.averageCost,
+                marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
+                gainLoss: 0,
+                gainLossPercent: 0
+              }));
+            }
+          } else {
+            // Fallback: use average cost as current price
+            updatedPositions = portfolio.positions!.map(position => ({
               ...position,
               currentPrice: position.averageCost,
               marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
               gainLoss: 0,
               gainLossPercent: 0
-            };
-          });
-        } catch (marketDataError) {
-          console.error('Failed to fetch market data:', marketDataError);
-          // Fallback: use average cost as current price
-          updatedPositions = portfolio.positions!.map(position => ({
-            ...position,
-            currentPrice: position.averageCost,
-            marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
-            gainLoss: 0,
-            gainLossPercent: 0
-          }));
-        }
-      } else {
-        // Fallback: use average cost as current price
-        updatedPositions = portfolio.positions!.map(position => ({
-          ...position,
-          currentPrice: position.averageCost,
-          marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
-          gainLoss: 0,
-          gainLossPercent: 0
-        }));
-      }
+            }));
+          }
 
-      // Calculate portfolio totals (using all positions, not paginated)
-      const totals = PortfolioCalculations.calculatePortfolioTotals(updatedPositions);
-      
-      // Generate portfolio summary (using all positions)
-      const summary = PortfolioCalculations.generatePortfolioSummary(updatedPositions);
-      
-      // Calculate position allocations
-      const positionsWithAllocations = PortfolioCalculations.calculatePositionAllocations(updatedPositions);
+          // Calculate portfolio totals (using all positions, not paginated)
+          const totals = PortfolioCalculations.calculatePortfolioTotals(updatedPositions);
+          
+          // Generate portfolio summary (using all positions)
+          const summary = PortfolioCalculations.generatePortfolioSummary(updatedPositions);
+          
+          // Calculate position allocations
+          const positionsWithAllocations = PortfolioCalculations.calculatePositionAllocations(updatedPositions);
 
-      // Apply pagination to positions
-      const validator = new PayloadValidator();
-      const paginatedPositions = validator.paginateResponse(positionsWithAllocations, page, limit);
+          // Apply pagination to positions
+          const validator = new PayloadValidator();
+          const paginatedPositions = validator.paginateResponse(positionsWithAllocations, page, limit);
 
-      // Update portfolio with calculated values and paginated positions
-      const updatedPortfolio = {
-        ...portfolio,
-        positions: paginatedPositions.data,
-        totalValue: totals.totalValue,
-        totalGainLoss: totals.totalGainLoss,
-        totalGainLossPercent: totals.totalGainLossPercent
-      };
+          // Update portfolio with calculated values and paginated positions
+          const updatedPortfolio = {
+            ...portfolio,
+            positions: paginatedPositions.data,
+            totalValue: totals.totalValue,
+            totalGainLoss: totals.totalGainLoss,
+            totalGainLossPercent: totals.totalGainLossPercent
+          };
+
+          return {
+            portfolio: updatedPortfolio,
+            summary,
+            performance: {
+              totalValue: totals.totalValue,
+              totalCostBasis: totals.totalCostBasis,
+              totalGainLoss: totals.totalGainLoss,
+              totalGainLossPercent: totals.totalGainLossPercent,
+              positionCount: updatedPositions.length
+            },
+            pagination: paginatedPositions.pagination
+          };
+        },
+        { ttl: 30, staleWhileRevalidate: 15 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Portfolio retrieved successfully',
-        data: {
-          portfolio: updatedPortfolio,
-          summary,
-          performance: {
-            totalValue: totals.totalValue,
-            totalCostBasis: totals.totalCostBasis,
-            totalGainLoss: totals.totalGainLoss,
-            totalGainLossPercent: totals.totalGainLossPercent,
-            positionCount: updatedPositions.length
-          },
-          pagination: paginatedPositions.pagination
-        },
+        data: portfolioData,
         timestamp: new Date()
       });
 
@@ -334,6 +370,10 @@ router.post('/position',
         purchaseDate
       });
 
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached portfolio data for this user
+      await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
+
       res.status(201).json({
         message: 'Stock position added successfully',
         data: newPosition,
@@ -433,6 +473,10 @@ router.put('/position/:id',
         return;
       }
 
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached portfolio data for this user
+      await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
+
       res.json({
         message: 'Stock position updated successfully',
         data: updatedPosition,
@@ -518,6 +562,10 @@ router.delete('/position/:id',
         return;
       }
 
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached portfolio data for this user
+      await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
+
       res.json({
         message: 'Stock position removed successfully',
         data: {
@@ -545,6 +593,7 @@ router.delete('/position/:id',
  * GET /api/portfolio/:userId/history
  * Get transaction history for user's portfolio
  * Supports pagination via ?page=0&limit=100 query parameters
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId/history',
   authenticateToken,
@@ -569,56 +618,66 @@ router.get('/:userId/history',
       const { page, limit: requestedLimit } = PayloadValidator.getPaginationParams(req);
       const limit = requestedLimit || 50;
 
-      // Get user's portfolios
-      const portfolios = await portfolioRepository.findByUserId(requestedUserId);
-      
-      if (portfolios.length === 0) {
-        res.json({
-          message: 'Transaction history retrieved successfully',
-          data: [],
-          pagination: {
-            page: 0,
-            limit,
-            total: 0,
-            totalPages: 0,
-            hasMore: false,
-            hasPrevious: false
-          },
-          timestamp: new Date()
-        });
-        return;
-      }
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for portfolio data
+      const historyData = await portfolioCache.get(
+        `user:${requestedUserId}:history:page:${page}:limit:${limit}`,
+        async () => {
+          // Get user's portfolios
+          const portfolios = await portfolioRepository.findByUserId(requestedUserId);
+          
+          if (portfolios.length === 0) {
+            return {
+              data: [],
+              pagination: {
+                page: 0,
+                limit,
+                total: 0,
+                totalPages: 0,
+                hasMore: false,
+                hasPrevious: false
+              }
+            };
+          }
 
-      // Get transaction history for the first portfolio (default portfolio)
-      const portfolio = portfolios[0];
-      if (!portfolio) {
-        res.json({
-          message: 'Transaction history retrieved successfully',
-          data: [],
-          pagination: {
-            page: 0,
-            limit,
-            total: 0,
-            totalPages: 0,
-            hasMore: false,
-            hasPrevious: false
-          },
-          timestamp: new Date()
-        });
-        return;
-      }
-      
-      // Get all history first to properly paginate
-      const allHistory = await portfolioRepository.getTransactionHistory(portfolio.id, 10000); // Get large set
-      
-      // Apply pagination
-      const validator = new PayloadValidator();
-      const paginatedResult = validator.paginateResponse(allHistory, page, limit);
+          // Get transaction history for the first portfolio (default portfolio)
+          const portfolio = portfolios[0];
+          if (!portfolio) {
+            return {
+              data: [],
+              pagination: {
+                page: 0,
+                limit,
+                total: 0,
+                totalPages: 0,
+                hasMore: false,
+                hasPrevious: false
+              }
+            };
+          }
+          
+          // Get all history first to properly paginate
+          const allHistory = await portfolioRepository.getTransactionHistory(portfolio.id, 10000);
+          
+          // Apply pagination
+          const validator = new PayloadValidator();
+          const paginatedResult = validator.paginateResponse(allHistory, page, limit);
+
+          return {
+            data: paginatedResult.data,
+            pagination: paginatedResult.pagination
+          };
+        },
+        { ttl: 30, staleWhileRevalidate: 15 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Transaction history retrieved successfully',
-        data: paginatedResult.data,
-        pagination: paginatedResult.pagination,
+        data: historyData.data,
+        pagination: historyData.pagination,
         timestamp: new Date()
       });
 
@@ -639,6 +698,7 @@ router.get('/:userId/history',
  * GET /api/portfolio/:userId/positions/filtered
  * Get filtered and sorted positions
  * Supports pagination via ?page=0&limit=100 query parameters
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId/positions/filtered',
   authenticateToken,
@@ -687,92 +747,105 @@ router.get('/:userId/positions/filtered',
         filters.sortOrder = req.query.sortOrder as any;
       }
 
-      // Get user's portfolios
-      const portfolios = await portfolioRepository.findByUserId(requestedUserId);
+      // Create cache key based on filters
+      const filterKey = JSON.stringify(filters);
       
-      if (portfolios.length === 0) {
-        res.json({
-          message: 'Filtered positions retrieved successfully',
-          data: [],
-          pagination: {
-            page: 0,
-            limit,
-            total: 0,
-            totalPages: 0,
-            hasMore: false,
-            hasPrevious: false
-          },
-          timestamp: new Date()
-        });
-        return;
-      }
-
-      // Get filtered positions for the first portfolio (default portfolio)
-      const portfolio = portfolios[0];
-      if (!portfolio) {
-        res.json({
-          message: 'Filtered positions retrieved successfully',
-          data: [],
-          pagination: {
-            page: 0,
-            limit,
-            total: 0,
-            totalPages: 0,
-            hasMore: false,
-            hasPrevious: false
-          },
-          timestamp: new Date()
-        });
-        return;
-      }
-      const positions = await portfolioRepository.findPositionsWithFilters(portfolio.id, filters);
-
-      // Apply market data and additional filtering if needed
-      let filteredPositions = positions;
-      
-      if (marketDataService && (filters.gainersOnly || filters.losersOnly || filters.minValue || filters.maxValue)) {
-        try {
-          const symbols = positions.map(pos => pos.symbol);
-          const quotes = await marketDataService.getBatchQuotes(symbols);
-          const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for portfolio data
+      const filteredData = await portfolioCache.get(
+        `user:${requestedUserId}:filtered:${filterKey}:page:${page}:limit:${limit}`,
+        async () => {
+          // Get user's portfolios
+          const portfolios = await portfolioRepository.findByUserId(requestedUserId);
           
-          // Update positions with current market data
-          const updatedPositions = positions.map(position => {
-            const quote = quoteMap.get(position.symbol);
-            if (quote) {
-              return PortfolioCalculations.updatePositionWithMarketData(position, quote);
-            }
+          if (portfolios.length === 0) {
             return {
-              ...position,
-              currentPrice: position.averageCost,
-              marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
-              gainLoss: 0,
-              gainLossPercent: 0
+              data: [],
+              pagination: {
+                page: 0,
+                limit,
+                total: 0,
+                totalPages: 0,
+                hasMore: false,
+                hasPrevious: false
+              }
             };
-          });
+          }
 
-          // Apply gain/loss and value filters
-          filteredPositions = updatedPositions.filter(position => {
-            if (filters.gainersOnly && (position.gainLoss || 0) <= 0) return false;
-            if (filters.losersOnly && (position.gainLoss || 0) >= 0) return false;
-            if (filters.minValue && (position.marketValue || 0) < filters.minValue) return false;
-            if (filters.maxValue && (position.marketValue || 0) > filters.maxValue) return false;
-            return true;
-          });
-        } catch (marketDataError) {
-          console.error('Failed to fetch market data for filtering:', marketDataError);
-          // Continue with basic filtering without market data
-        }
-      }
+          // Get filtered positions for the first portfolio (default portfolio)
+          const portfolio = portfolios[0];
+          if (!portfolio) {
+            return {
+              data: [],
+              pagination: {
+                page: 0,
+                limit,
+                total: 0,
+                totalPages: 0,
+                hasMore: false,
+                hasPrevious: false
+              }
+            };
+          }
+          const positions = await portfolioRepository.findPositionsWithFilters(portfolio.id, filters);
 
-      // Apply pagination
-      const validator = new PayloadValidator();
-      const paginatedResult = validator.paginateResponse(filteredPositions, page, limit);
+          // Apply market data and additional filtering if needed
+          let filteredPositions = positions;
+          
+          if (marketDataService && (filters.gainersOnly || filters.losersOnly || filters.minValue || filters.maxValue)) {
+            try {
+              const symbols = positions.map(pos => pos.symbol);
+              const quotes = await marketDataService.getBatchQuotes(symbols);
+              const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
+              
+              // Update positions with current market data
+              const updatedPositions = positions.map(position => {
+                const quote = quoteMap.get(position.symbol);
+                if (quote) {
+                  return PortfolioCalculations.updatePositionWithMarketData(position, quote);
+                }
+                return {
+                  ...position,
+                  currentPrice: position.averageCost,
+                  marketValue: PortfolioCalculations.calculateMarketValue(position, position.averageCost),
+                  gainLoss: 0,
+                  gainLossPercent: 0
+                };
+              });
+
+              // Apply gain/loss and value filters
+              filteredPositions = updatedPositions.filter(position => {
+                if (filters.gainersOnly && (position.gainLoss || 0) <= 0) return false;
+                if (filters.losersOnly && (position.gainLoss || 0) >= 0) return false;
+                if (filters.minValue && (position.marketValue || 0) < filters.minValue) return false;
+                if (filters.maxValue && (position.marketValue || 0) > filters.maxValue) return false;
+                return true;
+              });
+            } catch (marketDataError) {
+              console.error('Failed to fetch market data for filtering:', marketDataError);
+              // Continue with basic filtering without market data
+            }
+          }
+
+          // Apply pagination
+          const validator = new PayloadValidator();
+          const paginatedResult = validator.paginateResponse(filteredPositions, page, limit);
+
+          return {
+            data: paginatedResult.data,
+            pagination: paginatedResult.pagination
+          };
+        },
+        { ttl: 30, staleWhileRevalidate: 15 }
+      );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Filtered positions retrieved successfully',
-        data: paginatedResult.data,
-        pagination: paginatedResult.pagination,
+        data: filteredData.data,
+        pagination: filteredData.pagination,
         timestamp: new Date()
       });
 
@@ -848,6 +921,10 @@ router.post('/bulk-operations',
         result = await portfolioRepository.bulkUpdatePositions(positionIds, updateData);
       }
 
+      // Requirement 9.2: Implement cache invalidation on data updates
+      // Invalidate all cached portfolio data for this user
+      await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
+
       res.json({
         message: `Bulk ${operation} operation completed`,
         data: result,
@@ -870,6 +947,7 @@ router.post('/bulk-operations',
 /**
  * GET /api/portfolio/:userId/performance/history
  * Get portfolio performance history for a given time range
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId/performance/history',
   authenticateToken,
@@ -902,10 +980,16 @@ router.get('/:userId/performance/history',
         return;
       }
 
-      const performanceData = await performanceService.getPortfolioPerformance(
-        requestedUserId,
-        timeRange
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for portfolio data
+      const performanceData = await portfolioCache.get(
+        `user:${requestedUserId}:performance:${timeRange}`,
+        async () => await performanceService.getPortfolioPerformance(requestedUserId, timeRange),
+        { ttl: 30, staleWhileRevalidate: 15 }
       );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Portfolio performance retrieved successfully',
@@ -929,6 +1013,7 @@ router.get('/:userId/performance/history',
 /**
  * GET /api/portfolio/stock/:symbol/performance
  * Get individual stock performance history
+ * Requirement 9.1: Cache market data responses for 60 seconds
  */
 router.get('/stock/:symbol/performance',
   authenticateToken,
@@ -958,10 +1043,17 @@ router.get('/stock/:symbol/performance',
         return;
       }
 
-      const performanceData = await performanceService.getStockPerformance(
-        symbol,
-        timeRange
+      // Use marketDataCache since this is stock-specific, not user-specific
+      // Requirement 9.1: 60s TTL for market data
+      const performanceData = await marketDataCache.get(
+        `stock:${symbol}:performance:${timeRange}`,
+        async () => await performanceService.getStockPerformance(symbol, timeRange),
+        { ttl: 60, staleWhileRevalidate: 30 }
       );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
 
       res.json({
         message: 'Stock performance retrieved successfully',
@@ -985,6 +1077,7 @@ router.get('/stock/:symbol/performance',
 /**
  * GET /api/portfolio/:userId/performance/comparison
  * Get portfolio vs market index comparison
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId/performance/comparison',
   authenticateToken,
@@ -1018,11 +1111,16 @@ router.get('/:userId/performance/comparison',
         return;
       }
 
-      const comparisonData = await performanceService.getPerformanceComparison(
-        requestedUserId,
-        timeRange,
-        indexSymbol
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for portfolio data
+      const comparisonData = await portfolioCache.get(
+        `user:${requestedUserId}:comparison:${timeRange}:${indexSymbol}`,
+        async () => await performanceService.getPerformanceComparison(requestedUserId, timeRange, indexSymbol),
+        { ttl: 30, staleWhileRevalidate: 15 }
       );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Performance comparison retrieved successfully',
@@ -1046,6 +1144,7 @@ router.get('/:userId/performance/comparison',
 /**
  * GET /api/portfolio/:userId/performance/metrics
  * Get detailed performance metrics
+ * Requirement 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId/performance/metrics',
   authenticateToken,
@@ -1078,10 +1177,16 @@ router.get('/:userId/performance/metrics',
         return;
       }
 
-      const metricsData = await performanceService.getPerformanceMetrics(
-        requestedUserId,
-        timeRange
+      // Use CacheManager with stale-while-revalidate pattern
+      // Requirement 9.2: 30s TTL for portfolio data
+      const metricsData = await portfolioCache.get(
+        `user:${requestedUserId}:metrics:${timeRange}`,
+        async () => await performanceService.getPerformanceMetrics(requestedUserId, timeRange),
+        { ttl: 30, staleWhileRevalidate: 15 }
       );
+
+      // Requirement 9.5: Set appropriate cache-control headers
+      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
       res.json({
         message: 'Performance metrics retrieved successfully',
