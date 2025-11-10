@@ -7,6 +7,7 @@ import { authenticateToken } from '../utils/auth';
 import { getTimeoutHandler } from '../middleware/timeoutHandler';
 import { getRetryStats } from '../middleware/retryMiddleware';
 import { marketDataCache } from '../utils/cacheManager';
+import { asyncHandler, ValidationError } from '../utils/errorHandler';
 
 /**
  * NOTE: Timeout handling is automatically applied via global middleware in server.ts
@@ -76,56 +77,37 @@ router.get('/quote/:symbol',
   authenticateToken,
   validateSymbol,
   handleValidationErrors,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { symbol } = req.params;
-      if (!symbol) {
-        res.status(400).json({
-          error: {
-            code: 'MISSING_SYMBOL',
-            message: 'Symbol parameter is required',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-      const upperSymbol = symbol.toUpperCase();
-
-      // Use CacheManager with stale-while-revalidate pattern
-      // Requirement 9.1: 60s TTL for market data
-      // Requirement 9.3: Implement stale-while-revalidate caching pattern
-      const quote = await marketDataCache.get(
-        `quote:${upperSymbol}`,
-        async () => {
-          const freshQuote = await marketDataService.getQuote(upperSymbol);
-          // Also cache in database for long-term storage
-          await marketDataRepository.cacheQuote(freshQuote);
-          return freshQuote;
-        },
-        { ttl: 60, staleWhileRevalidate: 30 }
-      );
-
-      // Requirement 9.5: Set appropriate cache-control headers
-      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
-      res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
-
-      res.json({
-        data: quote,
-        timestamp: new Date(),
-        source: 'cache'
-      });
-
-    } catch (error) {
-      console.error('Error fetching stock quote:', error);
-      res.status(500).json({
-        error: {
-          code: 'MARKET_DATA_ERROR',
-          message: error instanceof Error ? error.message : 'Failed to fetch stock quote',
-          timestamp: new Date()
-        }
-      });
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const { symbol } = req.params;
+    if (!symbol) {
+      throw new ValidationError('Symbol parameter is required');
     }
-  }
+    const upperSymbol = symbol.toUpperCase();
+
+    // Use CacheManager with stale-while-revalidate pattern
+    // Requirement 9.1: 60s TTL for market data
+    // Requirement 9.3: Implement stale-while-revalidate caching pattern
+    const quote = await marketDataCache.get(
+      `quote:${upperSymbol}`,
+      async () => {
+        const freshQuote = await marketDataService.getQuote(upperSymbol);
+        // Also cache in database for long-term storage
+        await marketDataRepository.cacheQuote(freshQuote);
+        return freshQuote;
+      },
+      { ttl: 60, staleWhileRevalidate: 30 }
+    );
+
+    // Requirement 9.5: Set appropriate cache-control headers
+    res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+    res.setHeader('CDN-Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30');
+
+    res.json({
+      data: quote,
+      timestamp: new Date(),
+      source: 'cache'
+    });
+  })
 );
 
 // Get multiple stock quotes
@@ -134,8 +116,7 @@ router.post('/quotes',
   authenticateToken,
   validateSymbols,
   handleValidationErrors,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
       const { symbols } = req.body;
       const upperSymbols = symbols.map((s: string) => s.toUpperCase());
 
@@ -169,18 +150,7 @@ router.post('/quotes',
         requestedSymbols: upperSymbols.length,
         returnedSymbols: quotes.length
       });
-
-    } catch (error) {
-      console.error('Error fetching batch quotes:', error);
-      res.status(500).json({
-        error: {
-          code: 'BATCH_QUOTES_ERROR',
-          message: error instanceof Error ? error.message : 'Failed to fetch batch quotes',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+  })
 );
 
 // Search for stocks
@@ -189,8 +159,7 @@ router.get('/search',
   authenticateToken,
   validateSearchQuery,
   handleValidationErrors,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
       const { q: query } = req.query as { q: string };
       
       // Use CacheManager with stale-while-revalidate pattern
@@ -211,18 +180,7 @@ router.get('/search',
         query: query,
         source: 'cache'
       });
-
-    } catch (error) {
-      console.error('Error searching stocks:', error);
-      res.status(500).json({
-        error: {
-          code: 'SEARCH_ERROR',
-          message: error instanceof Error ? error.message : 'Failed to search stocks',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+  })
 );
 
 // Get historical data
@@ -232,18 +190,10 @@ router.get('/history/:symbol',
   validateSymbol,
   validatePeriod,
   handleValidationErrors,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
       const { symbol } = req.params;
       if (!symbol) {
-        res.status(400).json({
-          error: {
-            code: 'MISSING_SYMBOL',
-            message: 'Symbol parameter is required',
-            timestamp: new Date()
-          }
-        });
-        return;
+        throw new ValidationError('Symbol parameter is required');
       }
       const { period = 'daily' } = req.query as { period?: string };
       const upperSymbol = symbol.toUpperCase();
@@ -266,18 +216,7 @@ router.get('/history/:symbol',
         period: period,
         source: 'cache'
       });
-
-    } catch (error) {
-      console.error('Error fetching historical data:', error);
-      res.status(500).json({
-        error: {
-          code: 'HISTORICAL_DATA_ERROR',
-          message: error instanceof Error ? error.message : 'Failed to fetch historical data',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+  })
 );
 
 // Validate stock symbol
@@ -286,18 +225,10 @@ router.get('/validate/:symbol',
   authenticateToken,
   validateSymbol,
   handleValidationErrors,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
       const { symbol } = req.params;
       if (!symbol) {
-        res.status(400).json({
-          error: {
-            code: 'MISSING_SYMBOL',
-            message: 'Symbol parameter is required',
-            timestamp: new Date()
-          }
-        });
-        return;
+        throw new ValidationError('Symbol parameter is required');
       }
       const upperSymbol = symbol.toUpperCase();
       
@@ -320,25 +251,14 @@ router.get('/validate/:symbol',
         timestamp: new Date(),
         source: 'cache'
       });
-
-    } catch (error) {
-      console.error('Error validating symbol:', error);
-      res.status(500).json({
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: error instanceof Error ? error.message : 'Failed to validate symbol',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+  })
 );
 
 // Get market status
 // Requirement 9.1: Cache market data responses for 60 seconds
 router.get('/status',
   authenticateToken,
-  async (req: Request, res: Response): Promise<void> => {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
       // Use CacheManager with stale-while-revalidate pattern
       const marketStatus = await marketDataCache.get(
@@ -367,7 +287,6 @@ router.get('/status',
         timestamp: new Date(),
         source: 'cache'
       });
-
     } catch (error) {
       console.error('Error getting market status:', error);
       
@@ -397,14 +316,13 @@ router.get('/status',
         source: 'fallback'
       });
     }
-  }
+  })
 );
 
 // WebSocket connection info
 router.get('/ws/info',
   authenticateToken,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
       // This would be injected by the WebSocket service if available
       const wsService = (req as any).wsService;
       
@@ -418,25 +336,14 @@ router.get('/ws/info',
         },
         timestamp: new Date()
       });
-    } catch (error) {
-      console.error('Error getting WebSocket info:', error);
-      res.status(500).json({
-        error: {
-          code: 'WEBSOCKET_INFO_ERROR',
-          message: 'Failed to get WebSocket information',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+  })
 );
 
 // Circuit breaker monitoring endpoint
 // Requirement: 5.5 - Add circuit breaker state monitoring
 router.get('/health/circuit-breaker',
   authenticateToken,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
       const state = marketDataService.getCircuitBreakerState();
       const stats = marketDataService.getCircuitBreakerStats();
       
@@ -459,17 +366,7 @@ router.get('/health/circuit-breaker',
         },
         timestamp: new Date()
       });
-    } catch (error) {
-      console.error('Error getting circuit breaker state:', error);
-      res.status(500).json({
-        error: {
-          code: 'CIRCUIT_BREAKER_ERROR',
-          message: 'Failed to get circuit breaker state',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+  })
 );
 
 // Helper function to describe circuit state
@@ -490,8 +387,7 @@ function getCircuitStateDescription(state: string): string {
 // Requirement: 3.5 - Add retry logging and monitoring
 router.get('/health/retry-stats',
   authenticateToken,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
       const allStats = getRetryStats();
       const marketDataStats = getRetryStats('marketData');
       
@@ -512,17 +408,7 @@ router.get('/health/retry-stats',
         },
         timestamp: new Date()
       });
-    } catch (error) {
-      console.error('Error getting retry stats:', error);
-      res.status(500).json({
-        error: {
-          code: 'RETRY_STATS_ERROR',
-          message: 'Failed to get retry statistics',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+  })
 );
 
 export default router;

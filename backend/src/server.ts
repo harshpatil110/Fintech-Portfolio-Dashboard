@@ -8,7 +8,7 @@ import WebSocketService from './services/WebSocketService';
 import redisClient from './config/redis';
 import {
   securityHeaders,
-  requestLogger,
+  requestLogger as securityRequestLogger,
   errorHandler,
   validateOrigin,
   preventParameterPollution,
@@ -16,6 +16,9 @@ import {
 } from './middleware/security';
 import { generalLimiter } from './middleware/rateLimiter';
 import { initializeErrorHandling, applyErrorHandlingMiddleware } from './config/initializeErrorHandling';
+import { requestLogging } from './middleware/requestLogger';
+import { logger } from './utils/logger';
+import { errorMonitoringService } from './services/ErrorMonitoringService';
 
 // Load environment variables
 dotenv.config();
@@ -46,8 +49,9 @@ app.use(cors({
   exposedHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset']
 }));
 
-// Request logging
-app.use(requestLogger);
+// Request logging with ID generation and structured logging
+app.use(requestLogging());
+app.use(securityRequestLogger);
 
 // Rate limiting
 app.use(generalLimiter);
@@ -59,13 +63,18 @@ app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 // Initialize error handling infrastructure (must be early in middleware chain)
 // This will be called in initializeServices() to ensure async setup
 
-// Health check endpoint
+// Health check endpoint with error monitoring
 app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
+  const health = errorMonitoringService.getHealthStatus();
+  const statusCode = health.healthy ? 200 : 503;
+  
+  res.status(statusCode).json({ 
+    status: health.healthy ? 'OK' : 'DEGRADED',
     timestamp: new Date().toISOString(),
     service: 'Fintech Portfolio API',
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    errorRate: health.errorRate,
+    message: health.message
   });
 });
 
@@ -91,21 +100,23 @@ async function initializeServices() {
     // Initialize WebSocket service
     webSocketService = new WebSocketService(server);
 
-    console.log('✅ All services initialized successfully');
+    logger.info('All services initialized successfully', undefined, {
+      services: ['error-handling', 'websocket', 'monitoring']
+    });
   } catch (error) {
-    console.error('❌ Failed to initialize services:', error);
+    logger.error('Failed to initialize services', error);
     // In production we should fail-fast, but allow dev to continue without Redis
     if (process.env.NODE_ENV === 'production') {
       process.exit(1);
     } else {
-      console.warn('⚠️  Continuing without all services in non-production environment');
+      logger.warn('Continuing without all services in non-production environment');
     }
   }
 }
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  logger.info('SIGTERM received, shutting down gracefully...');
   
   if (webSocketService) {
     webSocketService.shutdown();
@@ -116,13 +127,13 @@ process.on('SIGTERM', async () => {
   }
   
   server.close(() => {
-    console.log('✅ Server closed');
+    logger.info('Server closed');
     process.exit(0);
   });
 });
 
 process.on('SIGINT', async () => {
-  console.log('🛑 SIGINT received, shutting down gracefully...');
+  logger.info('SIGINT received, shutting down gracefully...');
   
   if (webSocketService) {
     webSocketService.shutdown();
@@ -133,13 +144,19 @@ process.on('SIGINT', async () => {
   }
   
   server.close(() => {
-    console.log('✅ Server closed');
+    logger.info('Server closed');
     process.exit(0);
   });
 });
 
 // Start server
 server.listen(PORT, async () => {
+  logger.info('Server started', undefined, {
+    port: PORT,
+    environment: process.env.NODE_ENV || 'development',
+    websocketEndpoint: `ws://localhost:${PORT}/ws/market`
+  });
+  
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Fintech Portfolio API ready`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);

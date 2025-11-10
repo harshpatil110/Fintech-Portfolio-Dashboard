@@ -2,6 +2,8 @@ import { Express } from 'express';
 import { initializeRedis, checkRedisHealth } from './redis';
 import { timeoutMiddleware } from '../middleware/timeoutHandler';
 import { payloadValidationMiddleware, paginationMiddleware } from '../middleware/payloadValidator';
+import { detectRedirectLoop, notFoundHandler } from '../middleware/routingValidator';
+import { loopPreventionMiddleware } from '../middleware/loopPrevention';
 import ErrorHandler from '../utils/errorHandler';
 import errorHandlingConfig from './errorHandling';
 
@@ -34,6 +36,19 @@ export async function initializeErrorHandling(app: Express): Promise<void> {
 
   // 2. Apply global error handling middleware
   console.log('🛡️  Applying error handling middleware...');
+
+  // Loop prevention middleware (must be early in chain)
+  app.use(loopPreventionMiddleware({
+    maxDepth: 10,
+    maxExecutionTime: 1000
+  }));
+  console.log('  ✓ Loop prevention (max depth: 10, max time: 1000ms)');
+
+  // Redirect loop detection
+  app.use(detectRedirectLoop({
+    maxRedirects: 5
+  }));
+  console.log('  ✓ Redirect loop detection (max: 5 redirects)');
 
   // Timeout tracking middleware
   app.use(timeoutMiddleware({
@@ -85,17 +100,8 @@ export async function initializeErrorHandling(app: Express): Promise<void> {
  * Apply error handling middleware at the end of middleware chain
  */
 export function applyErrorHandlingMiddleware(app: Express): void {
-  // 404 handler - must be after all routes
-  app.use((req, res, next) => {
-    res.status(404).json({
-      error: {
-        code: 'NOT_FOUND',
-        message: `Cannot ${req.method} ${req.path}`,
-        timestamp: new Date().toISOString(),
-        requestId: req.headers['x-request-id']
-      }
-    });
-  });
+  // 404 handler with helpful messages - must be after all routes
+  app.use(notFoundHandler);
 
   // Global error handler - must be last
   app.use(ErrorHandler.middleware());

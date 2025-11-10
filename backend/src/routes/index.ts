@@ -4,6 +4,7 @@ import userRoutes from './users';
 import marketRoutes from './market';
 import portfolioRoutes from './portfolio';
 import watchlistRoutes from './watchlist';
+import monitoringRoutes from './monitoring';
 
 const router = Router();
 
@@ -13,6 +14,7 @@ router.use('/users', userRoutes);
 router.use('/market', marketRoutes);
 router.use('/portfolio', portfolioRoutes);
 router.use('/watchlist', watchlistRoutes);
+router.use('/monitoring', monitoringRoutes);
 
 // API info endpoint
 router.get('/', (req, res) => {
@@ -59,6 +61,12 @@ router.get('/', (req, res) => {
         removeFromWatchlist: 'DELETE /api/watchlist/:userId/:symbol',
         clearWatchlist: 'DELETE /api/watchlist/:userId',
         updateWatchlistItem: 'PUT /api/watchlist/:userId/:symbol'
+      },
+      monitoring: {
+        health: 'GET /api/monitoring/health',
+        stats: 'GET /api/monitoring/stats',
+        recentErrors: 'GET /api/monitoring/errors/recent',
+        resetStats: 'POST /api/monitoring/stats/reset'
       }
     },
     timestamp: new Date()

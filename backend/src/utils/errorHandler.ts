@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import { logger } from './logger';
+import { errorMonitoringService } from '../services/ErrorMonitoringService';
 
 /**
  * Standard error response format
@@ -91,8 +93,8 @@ export class ErrorHandler {
   static handle(error: any, req: Request): ErrorResponse {
     const errorResponse = this.buildErrorResponse(error, req);
     
-    // Log error
-    this.logError(error, req, errorResponse);
+    // Track error in monitoring service
+    errorMonitoringService.trackError(error, req);
     
     return errorResponse;
   }
@@ -146,40 +148,13 @@ export class ErrorHandler {
 
   /**
    * Log error with context
+   * @deprecated Use logger.logError() instead
    */
   private static logError(error: any, req: Request, response: ErrorResponse): void {
-    const logData = {
-      error: {
-        name: error.name,
-        message: error.message,
-        code: error.code,
-        stack: error.stack,
-        statusCode: this.getStatusCode(error)
-      },
-      request: {
-        method: req.method,
-        url: req.url,
-        path: req.path,
-        query: req.query,
-        headers: {
-          'user-agent': req.headers['user-agent'],
-          'content-type': req.headers['content-type'],
-          'x-request-id': req.headers['x-request-id']
-        },
-        ip: req.ip,
-        requestId: response.error.requestId
-      },
-      timestamp: response.error.timestamp
-    };
-
-    // Log based on severity
-    if (this.getStatusCode(error) >= 500) {
-      console.error('❌ Server Error:', JSON.stringify(logData, null, 2));
-    } else if (this.getStatusCode(error) >= 400) {
-      console.warn('⚠️  Client Error:', JSON.stringify(logData, null, 2));
-    } else {
-      console.log('ℹ️  Error:', JSON.stringify(logData, null, 2));
-    }
+    // Legacy logging - now handled by ErrorMonitoringService
+    // Kept for backward compatibility
+    const context = logger.extractRequestContext(req);
+    logger.logError(error, req);
   }
 
   /**

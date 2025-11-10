@@ -268,10 +268,13 @@ export function retryStatsMiddleware() {
     const stats = retryStatsTracker.getStats(endpointType);
     
     if (stats && typeof stats === 'object' && 'totalRequests' in stats) {
+      const retriedRequests = Number(stats.retriedRequests) || 0;
+      const successfulRetries = Number(stats.successfulRetries) || 0;
+      
       res.setHeader('X-Retry-Stats-Total', stats.totalRequests.toString());
-      res.setHeader('X-Retry-Stats-Retried', stats.retriedRequests.toString());
+      res.setHeader('X-Retry-Stats-Retried', retriedRequests.toString());
       res.setHeader('X-Retry-Stats-Success-Rate', 
-        ((stats.successfulRetries / Math.max(stats.retriedRequests, 1)) * 100).toFixed(2));
+        ((successfulRetries / Math.max(retriedRequests, 1)) * 100).toFixed(2));
     }
     
     next();
