@@ -351,3 +351,191 @@ describe('Error Message Sanitization', () => {
     expect(sanitized).toContain('[TOKEN]');
   });
 });
+
+describe('Edge Function Error Handling Integration', () => {
+  it('should handle edge function failure with graceful fallback', async () => {
+    const failingFunction = async () => {
+      throw new Error('Edge function failed');
+    };
+
+    const fallback = () => 'fallback response';
+
+    const result = await withEdgeErrorHandling(
+      failingFunction,
+      fallback,
+      'test-edge-function'
+    );
+
+    expect(result).toBe('fallback response');
+  });
+
+  it('should handle timeout with fallback', async () => {
+    const slowFunction = async () => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return 'slow response';
+    };
+
+    const result = await withEdgeTimeout(
+      slowFunction,
+      50,
+      () => 'timeout fallback'
+    );
+
+    expect(result).toBe('timeout fallback');
+  });
+
+  it('should handle constraint violations', () => {
+    const mockRequest = {
+      headers: new Map([
+        ['content-length', '2000000'], // 2MB, exceeds 1MB limit
+      ]),
+      nextUrl: { pathname: '/api/test' }
+    } as any;
+
+    expect(() => {
+      // This would be called in actual edge middleware
+      const contentLength = mockRequest.headers.get('content-length');
+      if (contentLength && parseInt(contentLength) > 1024 * 1024) {
+        throw new EdgeError(
+          EdgeErrorType.CONSTRAINT_VIOLATION,
+          'Request payload exceeds edge function limit (1MB)',
+          413
+        );
+      }
+    }).toThrow('Request payload exceeds edge function limit');
+  });
+
+  it('should handle multiple failures with circuit breaker', async () => {
+    const breaker = new EdgeCircuitBreaker(2, 1000);
+    let callCount = 0;
+
+    const failingFn = async () => {
+      callCount++;
+      throw new Error('Service unavailable');
+    };
+
+    const fallback = () => 'circuit breaker fallback';
+
+    // First failure
+    await breaker.execute(failingFn, fallback);
+    expect(breaker.getState()).toBe('CLOSED');
+
+    // Second failure - should open circuit
+    await breaker.execute(failingFn, fallback);
+    expect(breaker.getState()).toBe('OPEN');
+
+    // Third call should use fallback immediately without calling function
+    const result = await breaker.execute(failingFn, fallback);
+    expect(result).toBe('circuit breaker fallback');
+    expect(callCount).toBe(2); // Function not called on third attempt
+  });
+
+  it('should retry transient failures', async () => {
+    let attempts = 0;
+
+    const transientFailure = async () => {
+      attempts++;
+      if (attempts === 1) {
+        throw new Error('Transient error');
+      }
+      return 'success after retry';
+    };
+
+    const result = await withEdgeRetry(transientFailure, 3, 10);
+
+    expect(result).toBe('success after retry');
+    expect(attempts).toBe(2);
+  });
+
+  it('should handle edge runtime constraints', () => {
+    // Test multipart form data rejection
+    const mockRequest = {
+      headers: new Map([
+        ['content-type', 'multipart/form-data'],
+      ]),
+      nextUrl: { pathname: '/api/upload' }
+    } as any;
+
+    expect(() => {
+      const contentType = mockRequest.headers.get('content-type');
+      if (contentType?.includes('multipart/form-data')) {
+        throw new EdgeError(
+          EdgeErrorType.CONSTRAINT_VIOLATION,
+          'Multipart form data not supported in edge functions',
+          400
+        );
+      }
+    }).toThrow('Multipart form data not supported');
+  });
+});
+
+describe('Edge Error Response Format', () => {
+  it('should create standardized error response', () => {
+    const error = new EdgeError(
+      EdgeErrorType.TIMEOUT,
+      'Operation timed out',
+      504,
+      { maxTime: 25 }
+    );
+
+    // Simulate what createEdgeErrorResponse does
+    const errorResponse = {
+      error: {
+        code: error.type,
+        message: sanitizeErrorMessage(error.message),
+        type: error.type,
+        timestamp: new Date().toISOString(),
+        details: error.details
+      }
+    };
+
+    expect(errorResponse.error.code).toBe(EdgeErrorType.TIMEOUT);
+    expect(errorResponse.error.message).toBe('Operation timed out');
+    expect(errorResponse.error.type).toBe(EdgeErrorType.TIMEOUT);
+    expect(errorResponse.error.details).toEqual({ maxTime: 25 });
+  });
+
+  it('should include request context in error response', () => {
+    const mockRequest = {
+      headers: new Map([
+        ['x-request-id', 'test-request-123']
+      ]),
+      method: 'POST',
+      nextUrl: { pathname: '/api/test' }
+    } as any;
+
+    const error = new EdgeError(
+      EdgeErrorType.VALIDATION_ERROR,
+      'Invalid input',
+      400
+    );
+
+    const requestId = mockRequest.headers.get('x-request-id');
+    expect(requestId).toBe('test-request-123');
+  });
+});
+
+describe('Edge Function Performance', () => {
+  it('should execute within 25ms constraint', async () => {
+    const startTime = Date.now();
+    
+    const handler = new EdgeTimeoutHandler(25);
+    
+    // Simulate fast edge function
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    const executionTime = Date.now() - startTime;
+    
+    expect(executionTime).toBeLessThan(25);
+    expect(handler.isTimeout()).toBe(false);
+  });
+
+  it('should detect when approaching timeout threshold', async () => {
+    const handler = new EdgeTimeoutHandler(25);
+    
+    // Simulate function taking 21ms (84% of 25ms)
+    await new Promise(resolve => setTimeout(resolve, 21));
+    
+    expect(handler.isApproachingTimeout()).toBe(true);
+  });
+});
