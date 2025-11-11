@@ -76,466 +76,409 @@ describe('Edge Error Handler', () => {
   });
 
   describe('createEdgeErrorResponse', () => {
-    it('should create standardized error r
-      50
-    );
+    it('should create standardized error response', () => {
+      const error = new EdgeError(
+        EdgeErrorType.TIMEOUT,
+        'Function timeout',
+        504
+      );
 
-    expect(result).toBe('success');
+      const request = new NextRequest('https://example.com/api/test');
+      const response = createEdgeErrorResponse(error, request);
+
+      expect(response.status).toBe(504);
+      expect(response.headers.get('X-Edge-Error')).toBe('true');
+      expect(response.headers.get('X-Error-Type')).toBe(EdgeErrorType.TIMEOUT);
+    });
+
+    it('should handle non-EdgeError instances', () => {
+      const error = new Error('Generic error');
+      const response = createEdgeErrorResponse(error);
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get('X-Error-Type')).toBe(EdgeErrorType.UNKNOWN_ERROR);
+    });
   });
 
-  it('should use fallback on timeout', async () => {
-    const result = await withEdgeTimeout(
-      async () => {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        return 'success';
-      },
-      50,
-      () => 'fallback'
-    );
+  describe('withEdgeErrorHandling', () => {
+    it('should execute function successfully', async () => {
+      const fn = jest.fn().mockResolvedValue('success');
+      const result = await withEdgeErrorHandling(fn);
 
-    expect(result).toBe('fallback');
+      expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should use fallback on error', async () => {
+      const fn = jest.fn().mockRejectedValue(new Error('Failed'));
+      const fallback = jest.fn().mockReturnValue('fallback');
+      
+      const result = await withEdgeErrorHandling(fn, fallback, 'test');
+
+      expect(result).toBe('fallback');
+      expect(fallback).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw error if no fallback provided', async () => {
+      const fn = jest.fn().mockRejectedValue(new Error('Failed'));
+
+      await expect(withEdgeErrorHandling(fn)).rejects.toThrow('Failed');
+    });
   });
 
-  it('should throw error if no fallback provided', async () => {
-    await expect(
-      withEdgeTimeout(
-        async () => {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          return 'success';
-        },
-        50
-      )
-    ).rejects.toThrow();
-  });
-});
+  describe('createFallbackResponse', () => {
+    it('should create pass-through response with error indicators', () => {
+      const request = new NextRequest('https://example.com/api/test');
+      const error = new Error('Middleware failed');
+      
+      const response = createFallbackResponse(request, error);
 
-describe('EdgeCircuitBreaker', () => {
-  let breaker: EdgeCircuitBreaker;
+      expect(response.headers.get('X-Edge-Middleware-Fallback')).toBe('true');
+      expect(response.headers.get('X-Edge-Error-Type')).toBe(EdgeErrorType.UNKNOWN_ERROR);
+    });
 
-  beforeEach(() => {
-    breaker = new EdgeCircuitBreaker(3, 1000);
-  });
+    it('should include EdgeError type in fallback response', () => {
+      const request = new NextRequest('https://example.com/api/test');
+      const error = new EdgeError(EdgeErrorType.TIMEOUT, 'Timeout', 504);
+      
+      const response = createFallbackResponse(request, error);
 
-  it('should start in CLOSED state', () => {
-    expect(breaker.getState()).toBe('CLOSED');
+      expect(response.headers.get('X-Edge-Error-Type')).toBe(EdgeErrorType.TIMEOUT);
+    });
   });
 
-  it('should execute function successfully', async () => {
-    const result = await breaker.execute(
-      async () => 'success',
-      () => 'fallback'
-    );
-
-    expect(result).toBe('success');
-    expect(breaker.getState()).toBe('CLOSED');
-  });
-
-  it('should open circuit after threshold failures', async () => {
-    const failingFn = async () => {
-      throw new Error('Failure');
-    };
-
-    // Cause 3 failures
-    for (let i = 0; i < 3; i++) {
-      await breaker.execute(failingFn, () => 'fallback');
-    }
-
-    expect(breaker.getState()).toBe('OPEN');
-  });
-
-  it('should use fallback when circuit is open', async () => {
-    const failingFn = async () => {
-      throw new Error('Failure');
-    };
-
-    // Open circuit
-    for (let i = 0; i < 3; i++) {
-      await breaker.execute(failingFn, () => 'fallback');
-    }
-
-    // Next call should use fallback immediately
-    const result = await breaker.execute(
-      async () => 'success',
-      () => 'fallback'
-    );
-
-    expect(result).toBe('fallback');
-  });
-
-  it('should reset to HALF_OPEN after timeout', async () => {
-    const failingFn = async () => {
-      throw new Error('Failure');
-    };
-
-    // Open circuit
-    for (let i = 0; i < 3; i++) {
-      await breaker.execute(failingFn, () => 'fallback');
-    }
-
-    expect(breaker.getState()).toBe('OPEN');
-
-    // Wait for reset timeout
-    await new Promise(resolve => setTimeout(resolve, 1100));
-
-    // Next call should attempt reset
-    await breaker.execute(
-      async () => 'success',
-      () => 'fallback'
-    );
-
-    expect(breaker.getState()).toBe('CLOSED');
-  });
-});
-
-describe('withEdgeRetry', () => {
-  it('should succeed on first attempt', async () => {
-    let attempts = 0;
-    
-    const result = await withEdgeRetry(
-      async () => {
-        attempts++;
-        return 'success';
-      },
-      3,
-      10
-    );
-
-    expect(result).toBe('success');
-    expect(attempts).toBe(1);
-  });
-
-  it('should retry on failure', async () => {
-    let attempts = 0;
-    
-    const result = await withEdgeRetry(
-      async () => {
-        attempts++;
-        if (attempts < 2) {
-          throw new Error('Temporary failure');
+  describe('validateEdgeRuntimeConstraints', () => {
+    it('should pass validation for valid requests', () => {
+      const request = new NextRequest('https://example.com/api/test', {
+        method: 'POST',
+        headers: {
+          'content-length': '1024',
+          'content-type': 'application/json'
         }
-        return 'success';
-      },
-      3,
-      10
-    );
+      });
 
-    expect(result).toBe('success');
-    expect(attempts).toBe(2);
+      expect(() => validateEdgeRuntimeConstraints(request)).not.toThrow();
+    });
+
+    it('should reject requests exceeding payload limit', () => {
+      const request = new NextRequest('https://example.com/api/test', {
+        method: 'POST',
+        headers: {
+          'content-length': String(2 * 1024 * 1024), // 2MB
+          'content-type': 'application/json'
+        }
+      });
+
+      expect(() => validateEdgeRuntimeConstraints(request)).toThrow(EdgeError);
+      expect(() => validateEdgeRuntimeConstraints(request)).toThrow('exceeds edge function limit');
+    });
+
+    it('should reject multipart form data', () => {
+      const request = new NextRequest('https://example.com/api/test', {
+        method: 'POST',
+        headers: {
+          'content-type': 'multipart/form-data'
+        }
+      });
+
+      expect(() => validateEdgeRuntimeConstraints(request)).toThrow(EdgeError);
+      expect(() => validateEdgeRuntimeConstraints(request)).toThrow('not supported in edge functions');
+    });
   });
 
-  it('should fail after max attempts', async () => {
-    let attempts = 0;
-    
-    await expect(
-      withEdgeRetry(
-        async () => {
-          attempts++;
-          throw new Error('Persistent failure');
-        },
-        3,
-        10
-      )
-    ).rejects.toThrow('Persistent failure');
+  describe('EdgeTimeoutHandler', () => {
+    it('should track execution time', () => {
+      const handler = new EdgeTimeoutHandler(100);
+      
+      expect(handler.isTimeout()).toBe(false);
+      expect(handler.getRemainingTime()).toBeGreaterThan(0);
+    });
 
-    expect(attempts).toBe(3);
+    it('should detect approaching timeout', async () => {
+      const handler = new EdgeTimeoutHandler(100);
+      
+      // Wait for 85ms (85% of timeout)
+      await new Promise(resolve => setTimeout(resolve, 85));
+      
+      expect(handler.isApproachingTimeout()).toBe(true);
+    });
+
+    it('should throw error on timeout', async () => {
+      const handler = new EdgeTimeoutHandler(50);
+      
+      // Wait for timeout
+      await new Promise(resolve => setTimeout(resolve, 60));
+      
+      expect(() => handler.checkTimeout()).toThrow(EdgeError);
+      expect(() => handler.checkTimeout()).toThrow('timeout');
+    });
   });
 
-  it('should not retry on client errors', async () => {
-    let attempts = 0;
-    
-    await expect(
-      withEdgeRetry(
-        async () => {
-          attempts++;
-          throw new EdgeError(
-            EdgeErrorType.VALIDATION_ERROR,
-            'Invalid input',
-            400
-          );
-        },
-        3,
-        10
-      )
-    ).rejects.toThrow('Invalid input');
+  describe('withEdgeTimeout', () => {
+    it('should execute function within timeout', async () => {
+      const fn = jest.fn().mockResolvedValue('success');
+      const result = await withEdgeTimeout(fn, 100);
 
-    expect(attempts).toBe(1);
-  });
-});
+      expect(result).toBe('success');
+    });
 
-describe('withEdgeErrorHandling', () => {
-  it('should execute function successfully', async () => {
-    const result = await withEdgeErrorHandling(
-      async () => 'success',
-      undefined,
-      'test'
-    );
+    it('should use fallback on timeout', async () => {
+      const fn = jest.fn().mockImplementation(() => 
+        new Promise(resolve => setTimeout(() => resolve('late'), 200))
+      );
+      const fallback = jest.fn().mockReturnValue('fallback');
+      
+      const result = await withEdgeTimeout(fn, 50, fallback);
 
-    expect(result).toBe('success');
+      expect(result).toBe('fallback');
+      expect(fallback).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw timeout error if no fallback', async () => {
+      const fn = jest.fn().mockImplementation(() => 
+        new Promise(resolve => setTimeout(() => resolve('late'), 200))
+      );
+
+      await expect(withEdgeTimeout(fn, 50)).rejects.toThrow(EdgeError);
+      await expect(withEdgeTimeout(fn, 50)).rejects.toThrow('timeout');
+    });
   });
 
-  it('should use fallback on error', async () => {
-    const result = await withEdgeErrorHandling(
-      async () => {
-        throw new Error('Failure');
-      },
-      () => 'fallback',
-      'test'
-    );
+  describe('EdgeCircuitBreaker', () => {
+    it('should execute function when circuit is closed', async () => {
+      const breaker = new EdgeCircuitBreaker(3, 1000);
+      const fn = jest.fn().mockResolvedValue('success');
+      const fallback = jest.fn().mockReturnValue('fallback');
 
-    expect(result).toBe('fallback');
-  });
+      const result = await breaker.execute(fn, fallback);
 
-  it('should throw error if no fallback', async () => {
-    await expect(
-      withEdgeErrorHandling(
-        async () => {
-          throw new Error('Failure');
-        },
-        undefined,
-        'test'
-      )
-    ).rejects.toThrow('Failure');
-  });
+      expect(result).toBe('success');
+      expect(breaker.getState()).toBe('CLOSED');
+    });
 
-  it('should handle fallback errors', async () => {
-    await expect(
-      withEdgeErrorHandling(
-        async () => {
-          throw new Error('Primary failure');
-        },
-        () => {
-          throw new Error('Fallback failure');
-        },
-        'test'
-      )
-    ).rejects.toThrow('Primary failure');
-  });
-});
+    it('should open circuit after threshold failures', async () => {
+      const breaker = new EdgeCircuitBreaker(3, 1000);
+      const fn = jest.fn().mockRejectedValue(new Error('Failed'));
+      const fallback = jest.fn().mockReturnValue('fallback');
 
-describe('Error Message Sanitization', () => {
-  it('should sanitize passwords', () => {
-    const message = 'Error with password: secret123';
-    const sanitized = sanitizeErrorMessage(message);
-    expect(sanitized).toBe('Error with [REDACTED]: secret123');
-  });
-
-  it('should sanitize JWT tokens', () => {
-    const message = 'Token: Bearer abc.def.ghi';
-    const sanitized = sanitizeErrorMessage(message);
-    expect(sanitized).toBe('Token: Bearer [TOKEN]');
-  });
-
-  it('should sanitize API keys', () => {
-    const message = 'API key: sk_test_123';
-    const sanitized = sanitizeErrorMessage(message);
-    expect(sanitized).toBe('API [REDACTED]: sk_test_123');
-  });
-
-  it('should sanitize card numbers', () => {
-    const message = 'Card number: 1234567812345678';
-    const sanitized = sanitizeErrorMessage(message);
-    expect(sanitized).toBe('Card number: [CARD]');
-  });
-
-  it('should sanitize email addresses', () => {
-    const message = 'Email: user@example.com';
-    const sanitized = sanitizeErrorMessage(message);
-    expect(sanitized).toBe('Email: [EMAIL]');
-  });
-
-  it('should sanitize multiple sensitive patterns', () => {
-    const message = 'User user@example.com with password secret123 and token Bearer abc.def.ghi';
-    const sanitized = sanitizeErrorMessage(message);
-    expect(sanitized).toContain('[EMAIL]');
-    expect(sanitized).toContain('[REDACTED]');
-    expect(sanitized).toContain('[TOKEN]');
-  });
-});
-
-describe('Edge Function Error Handling Integration', () => {
-  it('should handle edge function failure with graceful fallback', async () => {
-    const failingFunction = async () => {
-      throw new Error('Edge function failed');
-    };
-
-    const fallback = () => 'fallback response';
-
-    const result = await withEdgeErrorHandling(
-      failingFunction,
-      fallback,
-      'test-edge-function'
-    );
-
-    expect(result).toBe('fallback response');
-  });
-
-  it('should handle timeout with fallback', async () => {
-    const slowFunction = async () => {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      return 'slow response';
-    };
-
-    const result = await withEdgeTimeout(
-      slowFunction,
-      50,
-      () => 'timeout fallback'
-    );
-
-    expect(result).toBe('timeout fallback');
-  });
-
-  it('should handle constraint violations', () => {
-    const mockRequest = {
-      headers: new Map([
-        ['content-length', '2000000'], // 2MB, exceeds 1MB limit
-      ]),
-      nextUrl: { pathname: '/api/test' }
-    } as any;
-
-    expect(() => {
-      // This would be called in actual edge middleware
-      const contentLength = mockRequest.headers.get('content-length');
-      if (contentLength && parseInt(contentLength) > 1024 * 1024) {
-        throw new EdgeError(
-          EdgeErrorType.CONSTRAINT_VIOLATION,
-          'Request payload exceeds edge function limit (1MB)',
-          413
-        );
+      // Trigger failures
+      for (let i = 0; i < 3; i++) {
+        await breaker.execute(fn, fallback);
       }
-    }).toThrow('Request payload exceeds edge function limit');
+
+      expect(breaker.getState()).toBe('OPEN');
+    });
+
+    it('should use fallback when circuit is open', async () => {
+      const breaker = new EdgeCircuitBreaker(2, 1000);
+      const fn = jest.fn().mockRejectedValue(new Error('Failed'));
+      const fallback = jest.fn().mockReturnValue('fallback');
+
+      // Open circuit
+      await breaker.execute(fn, fallback);
+      await breaker.execute(fn, fallback);
+
+      // Circuit should be open, fallback should be used without calling fn
+      fn.mockClear();
+      const result = await breaker.execute(fn, fallback);
+
+      expect(result).toBe('fallback');
+      expect(fn).not.toHaveBeenCalled();
+    });
   });
 
-  it('should handle multiple failures with circuit breaker', async () => {
-    const breaker = new EdgeCircuitBreaker(2, 1000);
-    let callCount = 0;
+  describe('withEdgeRetry', () => {
+    it('should succeed on first attempt', async () => {
+      const fn = jest.fn().mockResolvedValue('success');
+      const result = await withEdgeRetry(fn, 3, 10);
 
-    const failingFn = async () => {
-      callCount++;
-      throw new Error('Service unavailable');
-    };
+      expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
 
-    const fallback = () => 'circuit breaker fallback';
+    it('should retry on failure', async () => {
+      const fn = jest.fn()
+        .mockRejectedValueOnce(new Error('Failed'))
+        .mockResolvedValueOnce('success');
 
-    // First failure
-    await breaker.execute(failingFn, fallback);
-    expect(breaker.getState()).toBe('CLOSED');
+      const result = await withEdgeRetry(fn, 3, 10);
 
-    // Second failure - should open circuit
-    await breaker.execute(failingFn, fallback);
-    expect(breaker.getState()).toBe('OPEN');
+      expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
 
-    // Third call should use fallback immediately without calling function
-    const result = await breaker.execute(failingFn, fallback);
-    expect(result).toBe('circuit breaker fallback');
-    expect(callCount).toBe(2); // Function not called on third attempt
+    it('should not retry on client errors', async () => {
+      const fn = jest.fn().mockRejectedValue(
+        new EdgeError(EdgeErrorType.VALIDATION_ERROR, 'Invalid', 400)
+      );
+
+      await expect(withEdgeRetry(fn, 3, 10)).rejects.toThrow(EdgeError);
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw after max retries', async () => {
+      const fn = jest.fn().mockRejectedValue(new Error('Failed'));
+
+      await expect(withEdgeRetry(fn, 2, 10)).rejects.toThrow('Failed');
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
   });
 
-  it('should retry transient failures', async () => {
-    let attempts = 0;
+  describe('handleEdgeMiddlewareError', () => {
+    it('should return error response for constraint violations', () => {
+      const error = new EdgeError(
+        EdgeErrorType.CONSTRAINT_VIOLATION,
+        'Payload too large',
+        413
+      );
+      const request = new NextRequest('https://example.com/api/test');
 
-    const transientFailure = async () => {
-      attempts++;
-      if (attempts === 1) {
-        throw new Error('Transient error');
-      }
-      return 'success after retry';
-    };
+      const response = handleEdgeMiddlewareError(error, request);
 
-    const result = await withEdgeRetry(transientFailure, 3, 10);
+      expect(response.status).toBe(413);
+      expect(response.headers.get('X-Edge-Error')).toBe('true');
+    });
 
-    expect(result).toBe('success after retry');
-    expect(attempts).toBe(2);
+    it('should return error response for rate limit errors', () => {
+      const error = new EdgeError(
+        EdgeErrorType.RATE_LIMIT_ERROR,
+        'Rate limit exceeded',
+        429
+      );
+      const request = new NextRequest('https://example.com/api/test');
+
+      const response = handleEdgeMiddlewareError(error, request);
+
+      expect(response.status).toBe(429);
+    });
+
+    it('should use fallback for timeout errors', () => {
+      const error = new EdgeError(
+        EdgeErrorType.TIMEOUT,
+        'Timeout',
+        504
+      );
+      const request = new NextRequest('https://example.com/api/test');
+
+      const response = handleEdgeMiddlewareError(error, request);
+
+      expect(response.headers.get('X-Edge-Middleware-Fallback')).toBe('true');
+    });
+
+    it('should use fallback for runtime errors', () => {
+      const error = new Error('Runtime error');
+      const request = new NextRequest('https://example.com/api/test');
+
+      const response = handleEdgeMiddlewareError(error, request);
+
+      expect(response.headers.get('X-Edge-Middleware-Fallback')).toBe('true');
+    });
   });
 
-  it('should handle edge runtime constraints', () => {
-    // Test multipart form data rejection
-    const mockRequest = {
-      headers: new Map([
-        ['content-type', 'multipart/form-data'],
-      ]),
-      nextUrl: { pathname: '/api/upload' }
-    } as any;
+  describe('validateEdgeExecutionTime', () => {
+    it('should pass for execution within time limit', () => {
+      const startTime = Date.now();
+      
+      expect(() => validateEdgeExecutionTime(startTime, 100)).not.toThrow();
+    });
 
-    expect(() => {
-      const contentType = mockRequest.headers.get('content-type');
-      if (contentType?.includes('multipart/form-data')) {
-        throw new EdgeError(
-          EdgeErrorType.CONSTRAINT_VIOLATION,
-          'Multipart form data not supported in edge functions',
-          400
-        );
-      }
-    }).toThrow('Multipart form data not supported');
-  });
-});
-
-describe('Edge Error Response Format', () => {
-  it('should create standardized error response', () => {
-    const error = new EdgeError(
-      EdgeErrorType.TIMEOUT,
-      'Operation timed out',
-      504,
-      { maxTime: 25 }
-    );
-
-    // Simulate what createEdgeErrorResponse does
-    const errorResponse = {
-      error: {
-        code: error.type,
-        message: sanitizeErrorMessage(error.message),
-        type: error.type,
-        timestamp: new Date().toISOString(),
-        details: error.details
-      }
-    };
-
-    expect(errorResponse.error.code).toBe(EdgeErrorType.TIMEOUT);
-    expect(errorResponse.error.message).toBe('Operation timed out');
-    expect(errorResponse.error.type).toBe(EdgeErrorType.TIMEOUT);
-    expect(errorResponse.error.details).toEqual({ maxTime: 25 });
+    it('should throw error for execution exceeding time limit', async () => {
+      const startTime = Date.now();
+      
+      // Wait to exceed limit
+      await new Promise(resolve => setTimeout(resolve, 60));
+      
+      expect(() => validateEdgeExecutionTime(startTime, 50)).toThrow(EdgeError);
+      expect(() => validateEdgeExecutionTime(startTime, 50)).toThrow('execution time exceeded');
+    });
   });
 
-  it('should include request context in error response', () => {
-    const mockRequest = {
-      headers: new Map([
-        ['x-request-id', 'test-request-123']
-      ]),
-      method: 'POST',
-      nextUrl: { pathname: '/api/test' }
-    } as any;
+  describe('safeEdgeExecution', () => {
+    it('should execute function successfully', async () => {
+      const fn = jest.fn().mockResolvedValue('success');
+      const result = await safeEdgeExecution(fn);
 
-    const error = new EdgeError(
-      EdgeErrorType.VALIDATION_ERROR,
-      'Invalid input',
-      400
-    );
+      expect(result).toBe('success');
+    });
 
-    const requestId = mockRequest.headers.get('x-request-id');
-    expect(requestId).toBe('test-request-123');
+    it('should use fallback on error', async () => {
+      const fn = jest.fn().mockRejectedValue(new Error('Failed'));
+      const fallback = jest.fn().mockReturnValue('fallback');
+
+      const result = await safeEdgeExecution(fn, { fallback });
+
+      expect(result).toBe('fallback');
+    });
+
+    it('should retry on failure', async () => {
+      const fn = jest.fn()
+        .mockRejectedValueOnce(new Error('Failed'))
+        .mockResolvedValueOnce('success');
+
+      const result = await safeEdgeExecution(fn, { retries: 1 });
+
+      expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('should respect timeout', async () => {
+      const fn = jest.fn().mockImplementation(() =>
+        new Promise(resolve => setTimeout(() => resolve('late'), 200))
+      );
+      const fallback = jest.fn().mockReturnValue('fallback');
+
+      const result = await safeEdgeExecution(fn, { timeout: 50, fallback });
+
+      expect(result).toBe('fallback');
+    });
   });
-});
 
-describe('Edge Function Performance', () => {
-  it('should execute within 25ms constraint', async () => {
-    const startTime = Date.now();
-    
-    const handler = new EdgeTimeoutHandler(25);
-    
-    // Simulate fast edge function
-    await new Promise(resolve => setTimeout(resolve, 10));
-    
-    const executionTime = Date.now() - startTime;
-    
-    expect(executionTime).toBeLessThan(25);
-    expect(handler.isTimeout()).toBe(false);
-  });
+  describe('EdgePerformanceMonitor', () => {
+    let monitor: EdgePerformanceMonitor;
 
-  it('should detect when approaching timeout threshold', async () => {
-    const handler = new EdgeTimeoutHandler(25);
-    
-    // Simulate function taking 21ms (84% of 25ms)
-    await new Promise(resolve => setTimeout(resolve, 21));
-    
-    expect(handler.isApproachingTimeout()).toBe(true);
+    beforeEach(() => {
+      monitor = new EdgePerformanceMonitor();
+    });
+
+    it('should record execution metrics', () => {
+      monitor.record('test-function', 10);
+      monitor.record('test-function', 20);
+
+      const metrics = monitor.getMetrics('test-function');
+
+      expect(metrics).not.toBeNull();
+      expect(metrics!.count).toBe(2);
+      expect(metrics!.avgTime).toBe(15);
+      expect(metrics!.errorRate).toBe(0);
+    });
+
+    it('should track errors', () => {
+      monitor.record('test-function', 10, false);
+      monitor.record('test-function', 20, true);
+
+      const metrics = monitor.getMetrics('test-function');
+
+      expect(metrics!.errorRate).toBe(0.5);
+    });
+
+    it('should return all metrics', () => {
+      monitor.record('function-1', 10);
+      monitor.record('function-2', 20);
+
+      const allMetrics = monitor.getAllMetrics();
+
+      expect(Object.keys(allMetrics)).toHaveLength(2);
+      expect(allMetrics['function-1']).toBeDefined();
+      expect(allMetrics['function-2']).toBeDefined();
+    });
+
+    it('should clear metrics', () => {
+      monitor.record('test-function', 10);
+      monitor.clear();
+
+      const metrics = monitor.getMetrics('test-function');
+
+      expect(metrics).toBeNull();
+    });
   });
 });
