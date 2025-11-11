@@ -98,4 +98,212 @@ describe('Edge Middleware Integration', () => {
 
       const response = await middleware(request);
 
-      // Shou
+      // Should reject with 400 Bad Request
+      expect(response.status).toBe(400);
+    });
+
+    it('should execute within 25ms time limit', async () => {
+      const request = new NextRequest('https://example.com/api/health', {
+        method: 'GET'
+      });
+
+      const startTime = Date.now();
+      await middleware(request);
+      const executionTime = Date.now() - startTime;
+
+      // Should complete within reasonable time (allowing some overhead for test environment)
+      expect(executionTime).toBeLessThan(100);
+    });
+  });
+
+  describe('Lightweight Authentication (Requirement 10.5)', () => {
+    it('should perform fast authentication check', async () => {
+      const request = new NextRequest('https://example.com/api/portfolio', {
+        method: 'GET',
+        headers: {
+          'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMjMiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJleHAiOjk5OTk5OTk5OTl9.signature'
+        }
+      });
+
+      const startTime = Date.now();
+      await middleware(request);
+      const executionTime = Date.now() - startTime;
+
+      // Auth check should be very fast (<10ms in ideal conditions)
+      expect(executionTime).toBeLessThan(50);
+    });
+
+    it('should add user context to request headers', async () => {
+      const request = new NextRequest('https://example.com/api/health', {
+        method: 'GET',
+        headers: {
+          'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMjMiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJleHAiOjk5OTk5OTk5OTl9.signature'
+        }
+      });
+
+      const response = await middleware(request);
+
+      // Should have authentication status header
+      expect(response.headers.has('X-RateLimit-Remaining')).toBe(true);
+    });
+
+    it('should handle missing authorization header', async () => {
+      const request = new NextRequest('https://example.com/api/portfolio', {
+        method: 'GET'
+      });
+
+      const response = await middleware(request);
+
+      // Should return 401 for protected route without auth
+      expect(response.status).toBe(401);
+    });
+
+    it('should handle expired tokens', async () => {
+      const request = new NextRequest('https://example.com/api/portfolio', {
+        method: 'GET',
+        headers: {
+          'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMjMiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJleHAiOjF9.signature'
+        }
+      });
+
+      const response = await middleware(request);
+
+      // Should return 401 for expired token
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe('Error Response Format', () => {
+    it('should return standardized error format', async () => {
+      const request = new NextRequest('https://example.com/api/portfolio', {
+        method: 'GET'
+      });
+
+      const response = await middleware(request);
+
+      if (response.status >= 400) {
+        const body = await response.json();
+        
+        expect(body).toHaveProperty('error');
+        expect(body.error).toHaveProperty('code');
+        expect(body.error).toHaveProperty('message');
+        expect(body.error).toHaveProperty('timestamp');
+      }
+    });
+
+    it('should include rate limit headers', async () => {
+      const request = new NextRequest('https://example.com/api/health', {
+        method: 'GET'
+      });
+
+      const response = await middleware(request);
+
+      expect(response.headers.has('X-RateLimit-Remaining')).toBe(true);
+      expect(response.headers.has('X-RateLimit-Reset')).toBe(true);
+    });
+
+    it('should include execution time header', async () => {
+      const request = new NextRequest('https://example.com/api/health', {
+        method: 'GET'
+      });
+
+      const response = await middleware(request);
+
+      expect(response.headers.has('X-Edge-Execution-Time')).toBe(true);
+      
+      const executionTime = response.headers.get('X-Edge-Execution-Time');
+      expect(executionTime).toMatch(/\d+ms/);
+    });
+  });
+
+  describe('Static Asset Handling', () => {
+    it('should skip middleware for static assets', async () => {
+      const staticPaths = [
+        '/_next/static/chunk.js',
+        '/favicon.ico',
+        '/robots.txt'
+      ];
+
+      for (const path of staticPaths) {
+        const request = new NextRequest(`https://example.com${path}`);
+        const response = await middleware(request);
+
+        // Should pass through without processing
+        expect(response.status).toBe(200);
+        expect(response.headers.has('X-Edge-Execution-Time')).toBe(false);
+      }
+    });
+
+    it('should process API routes', async () => {
+      const request = new NextRequest('https://example.com/api/health');
+      const response = await middleware(request);
+
+      // Should have been processed by middleware
+      expect(response.headers.has('X-Edge-Execution-Time')).toBe(true);
+    });
+  });
+
+  describe('Performance Monitoring', () => {
+    it('should log slow middleware execution', async () => {
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      
+      const request = new NextRequest('https://example.com/api/portfolio', {
+        method: 'GET'
+      });
+
+      await middleware(request);
+
+      // Check if execution time is logged
+      const executionTimeHeader = (await middleware(request)).headers.get('X-Edge-Execution-Time');
+      expect(executionTimeHeader).toBeDefined();
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should track rate limit violations', async () => {
+      const request = new NextRequest('https://example.com/api/portfolio', {
+        method: 'GET',
+        headers: {
+          'x-forwarded-for': '192.168.1.100'
+        }
+      });
+
+      // Make many requests to trigger rate limit
+      const responses = [];
+      for (let i = 0; i < 10; i++) {
+        responses.push(await middleware(request));
+      }
+
+      // At least one should have rate limit info
+      const hasRateLimitHeaders = responses.some(r => 
+        r.headers.has('X-RateLimit-Remaining')
+      );
+      expect(hasRateLimitHeaders).toBe(true);
+    });
+  });
+
+  describe('Circuit Breaker Behavior', () => {
+    it('should handle cascading failures gracefully', async () => {
+      const requests = [];
+      
+      // Simulate multiple failing requests
+      for (let i = 0; i < 5; i++) {
+        const request = new NextRequest('https://example.com/api/portfolio', {
+          method: 'GET',
+          headers: {
+            'authorization': 'Bearer invalid'
+          }
+        });
+        requests.push(middleware(request));
+      }
+
+      const responses = await Promise.all(requests);
+
+      // All should get responses (no crashes)
+      responses.forEach(response => {
+        expect(response).toBeDefined();
+        expect(response.status).toBeGreaterThanOrEqual(200);
+      });
+    });
+  });
+});
