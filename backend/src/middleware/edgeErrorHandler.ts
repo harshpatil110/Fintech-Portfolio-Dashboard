@@ -92,7 +92,7 @@ export function createEdgeErrorResponse(
 /**
  * Sanitize error message to prevent information leakage
  */
-function sanitizeErrorMessage(message: string): string {
+export function sanitizeErrorMessage(message: string): string {
   // Remove sensitive patterns
   return message
     .replace(/password|token|secret|key|api[_-]?key/gi, '[REDACTED]')
