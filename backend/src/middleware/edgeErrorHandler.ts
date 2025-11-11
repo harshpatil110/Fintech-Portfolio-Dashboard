@@ -410,19 +410,195 @@ export function createEdgeHealthCheck(): NextResponse {
 }
 
 /**
+ * Validate edge function execution constraints
+ * Requirement 10.2: Avoid heavy computations in edge functions
+ */
+export function validateEdgeExecutionTime(
+  startTime: number,
+  maxTime: number = 25,
+  context?: string
+): void {
+  const elapsed = Date.now() - startTime;
+  
+  if (elapsed > maxTime) {
+    console.warn(`⚠️ Edge function exceeded time limit: ${elapsed}ms (max: ${maxTime}ms)${context ? ` in ${context}` : ''}`);
+    
+    throw new EdgeError(
+      EdgeErrorType.TIMEOUT,
+      `Edge function execution time exceeded (${elapsed}ms > ${maxTime}ms)`,
+      504,
+      { elapsed, maxTime, context }
+    );
+  }
+}
+
+/**
+ * Safe edge function wrapper with comprehensive error handling
+ * Requirement 10.4: Graceful fallback when edge function fails
+ * Requirement 10.5: Lightweight authentication checks
+ */
+export async function safeEdgeExecution<T>(
+  fn: () => Promise<T>,
+  options: {
+    fallback?: () => T | Promise<T>;
+    timeout?: number;
+    context?: string;
+    retries?: number;
+  } = {}
+): Promise<T> {
+  const {
+    fallback,
+    timeout = 25,
+    context,
+    retries = 0
+  } = options;
+
+  try {
+    // Wrap with timeout protection
+    const result = await withEdgeTimeout(fn, timeout, fallback);
+    return result;
+  } catch (error) {
+    console.error(`Edge function error${context ? ` in ${context}` : ''}:`, error);
+
+    // Try fallback if available
+    if (fallback) {
+      try {
+        console.log(`Using fallback${context ? ` for ${context}` : ''}`);
+        return await Promise.resolve(fallback());
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
+      }
+    }
+
+    // Retry if configured
+    if (retries > 0) {
+      console.log(`Retrying${context ? ` ${context}` : ''} (${retries} attempts remaining)`);
+      return safeEdgeExecution(fn, {
+        ...options,
+        retries: retries - 1
+      });
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Monitor edge function performance
+ */
+export class EdgePerformanceMonitor {
+  private metrics: Map<string, { count: number; totalTime: number; errors: number }> = new Map();
+
+  /**
+   * Record execution time for a function
+   */
+  record(name: string, executionTime: number, error: boolean = false): void {
+    const existing = this.metrics.get(name) || { count: 0, totalTime: 0, errors: 0 };
+    
+    existing.count++;
+    existing.totalTime += executionTime;
+    if (error) {
+      existing.errors++;
+    }
+
+    this.metrics.set(name, existing);
+
+    // Log warning if average time exceeds threshold
+    const avgTime = existing.totalTime / existing.count;
+    if (avgTime > 20) {
+      console.warn(`⚠️ Edge function ${name} average time: ${avgTime.toFixed(2)}ms (threshold: 20ms)`);
+    }
+
+    // Log warning if error rate is high
+    const errorRate = existing.errors / existing.count;
+    if (errorRate > 0.05) {
+      console.warn(`⚠️ Edge function ${name} error rate: ${(errorRate * 100).toFixed(2)}% (threshold: 5%)`);
+    }
+  }
+
+  /**
+   * Get metrics for a function
+   */
+  getMetrics(name: string): { count: number; avgTime: number; errorRate: number } | null {
+    const metrics = this.metrics.get(name);
+    if (!metrics) return null;
+
+    return {
+      count: metrics.count,
+      avgTime: metrics.totalTime / metrics.count,
+      errorRate: metrics.errors / metrics.count
+    };
+  }
+
+  /**
+   * Get all metrics
+   */
+  getAllMetrics(): Record<string, { count: number; avgTime: number; errorRate: number }> {
+    const result: Record<string, { count: number; avgTime: number; errorRate: number }> = {};
+    
+    for (const [name, metrics] of this.metrics.entries()) {
+      result[name] = {
+        count: metrics.count,
+        avgTime: metrics.totalTime / metrics.count,
+        errorRate: metrics.errors / metrics.count
+      };
+    }
+
+    return result;
+  }
+
+  /**
+   * Clear metrics
+   */
+  clear(): void {
+    this.metrics.clear();
+  }
+}
+
+// Global performance monitor instance
+export const edgePerformanceMonitor = new EdgePerformanceMonitor();
+
+/**
  * Handle edge function errors in middleware
+ * Requirement 10.4: Allow request to proceed when edge function fails
  */
 export function handleEdgeMiddlewareError(
   error: Error,
   request: NextRequest
 ): NextResponse {
-  // For critical errors, return error response
+  // For critical errors that should block the request, return error response
   if (error instanceof EdgeError) {
+    // Constraint violations (payload too large, unsupported features)
     if (error.type === EdgeErrorType.CONSTRAINT_VIOLATION) {
+      return createEdgeErrorResponse(error, request);
+    }
+    
+    // Authentication errors on protected routes
+    if (error.type === EdgeErrorType.AUTHENTICATION_ERROR && !isPublicRoute(request.nextUrl.pathname)) {
+      return createEdgeErrorResponse(error, request);
+    }
+    
+    // Rate limit errors should be enforced
+    if (error.type === EdgeErrorType.RATE_LIMIT_ERROR) {
       return createEdgeErrorResponse(error, request);
     }
   }
 
-  // For non-critical errors, fail open with fallback
+  // For non-critical errors (timeouts, runtime errors), fail open with fallback
+  // This ensures the application remains available even if edge middleware fails
   return createFallbackResponse(request, error);
+}
+
+/**
+ * Check if route is public (doesn't require authentication)
+ */
+function isPublicRoute(pathname: string): boolean {
+  const publicRoutes = [
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/refresh',
+    '/api/health',
+    '/api/monitoring/health'
+  ];
+  return publicRoutes.some(route => pathname.startsWith(route));
 }

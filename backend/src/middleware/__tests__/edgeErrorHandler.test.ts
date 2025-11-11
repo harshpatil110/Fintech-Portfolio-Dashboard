@@ -1,82 +1,82 @@
 /**
  * Edge Error Handler Tests
- * Tests for edge function error handling and fallback mechanisms
+ * Tests edge function error handling, fallbacks, and constraints
+ * Requirements: 10.4, 10.5
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { NextRequest, NextResponse } from 'next/server';
 import {
   EdgeError,
   EdgeErrorType,
-  EdgeTimeoutHandler,
-  EdgeCircuitBreaker,
-  withEdgeTimeout,
-  withEdgeRetry,
+  createEdgeErrorResponse,
+  sanitizeErrorMessage,
   withEdgeErrorHandling,
-  sanitizeErrorMessage
+  createFallbackResponse,
+  validateEdgeRuntimeConstraints,
+  EdgeTimeoutHandler,
+  withEdgeTimeout,
+  EdgeCircuitBreaker,
+  withEdgeRetry,
+  handleEdgeMiddlewareError,
+  validateEdgeExecutionTime,
+  safeEdgeExecution,
+  EdgePerformanceMonitor
 } from '../edgeErrorHandler';
 
-describe('EdgeError', () => {
-  it('should create edge error with correct properties', () => {
-    const error = new EdgeError(
-      EdgeErrorType.TIMEOUT,
-      'Operation timeout',
-      504,
-      { maxTime: 25 }
-    );
+describe('Edge Error Handler', () => {
+  describe('EdgeError', () => {
+    it('should create edge error with correct properties', () => {
+      const error = new EdgeError(
+        EdgeErrorType.TIMEOUT,
+        'Function timeout',
+        504,
+        { maxTime: 25 }
+      );
 
-    expect(error.type).toBe(EdgeErrorType.TIMEOUT);
-    expect(error.message).toBe('Operation timeout');
-    expect(error.statusCode).toBe(504);
-    expect(error.details).toEqual({ maxTime: 25 });
-    expect(error.name).toBe('EdgeError');
-  });
-});
-
-describe('EdgeTimeoutHandler', () => {
-  it('should track execution time', async () => {
-    const handler = new EdgeTimeoutHandler(100);
-    
-    await new Promise(resolve => setTimeout(resolve, 50));
-    
-    expect(handler.isTimeout()).toBe(false);
-    expect(handler.getRemainingTime()).toBeLessThan(100);
-    expect(handler.getRemainingTime()).toBeGreaterThan(0);
+      expect(error.name).toBe('EdgeError');
+      expect(error.type).toBe(EdgeErrorType.TIMEOUT);
+      expect(error.message).toBe('Function timeout');
+      expect(error.statusCode).toBe(504);
+      expect(error.details).toEqual({ maxTime: 25 });
+    });
   });
 
-  it('should detect timeout', async () => {
-    const handler = new EdgeTimeoutHandler(50);
-    
-    await new Promise(resolve => setTimeout(resolve, 60));
-    
-    expect(handler.isTimeout()).toBe(true);
-    expect(handler.getRemainingTime()).toBe(0);
+  describe('sanitizeErrorMessage', () => {
+    it('should redact sensitive information', () => {
+      const message = 'Error with password: secret123 and token: abc123';
+      const sanitized = sanitizeErrorMessage(message);
+      
+      expect(sanitized).toContain('[REDACTED]');
+      expect(sanitized).not.toContain('secret123');
+    });
+
+    it('should redact credit card numbers', () => {
+      const message = 'Payment failed for card 1234567890123456';
+      const sanitized = sanitizeErrorMessage(message);
+      
+      expect(sanitized).toContain('[CARD]');
+      expect(sanitized).not.toContain('1234567890123456');
+    });
+
+    it('should redact email addresses', () => {
+      const message = 'User test@example.com not found';
+      const sanitized = sanitizeErrorMessage(message);
+      
+      expect(sanitized).toContain('[EMAIL]');
+      expect(sanitized).not.toContain('test@example.com');
+    });
+
+    it('should redact bearer tokens', () => {
+      const message = 'Invalid token: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U';
+      const sanitized = sanitizeErrorMessage(message);
+      
+      expect(sanitized).toContain('Bearer [TOKEN]');
+      expect(sanitized).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
+    });
   });
 
-  it('should detect approaching timeout', async () => {
-    const handler = new EdgeTimeoutHandler(100);
-    
-    await new Promise(resolve => setTimeout(resolve, 85));
-    
-    expect(handler.isApproachingTimeout()).toBe(true);
-  });
-
-  it('should throw timeout error when checking', async () => {
-    const handler = new EdgeTimeoutHandler(50);
-    
-    await new Promise(resolve => setTimeout(resolve, 60));
-    
-    expect(() => handler.checkTimeout()).toThrow(EdgeError);
-    expect(() => handler.checkTimeout()).toThrow('timeout');
-  });
-});
-
-describe('withEdgeTimeout', () => {
-  it('should execute function within timeout', async () => {
-    const result = await withEdgeTimeout(
-      async () => {
-        await new Promise(resolve => setTimeout(resolve, 10));
-        return 'success';
-      },
+  describe('createEdgeErrorResponse', () => {
+    it('should create standardized error r
       50
     );
 
