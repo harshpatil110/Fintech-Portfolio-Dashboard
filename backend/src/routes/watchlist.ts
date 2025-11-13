@@ -14,10 +14,23 @@ import {
 } from '../middleware/validation';
 import { watchlistLimiter, bulkOperationsLimiter } from '../middleware/rateLimiter';
 import { CacheManager } from '../utils/cacheManager';
+import { asyncHandler } from '../utils/errorHandler';
+import { RetryHandler, isRetryableError } from '../utils/retryHandler';
+import { getTimeoutHandler } from '../middleware/timeoutHandler';
+import { PayloadValidator } from '../middleware/payloadValidator';
 
 const router = Router();
 const watchlistRepository = new WatchlistRepository();
 let marketDataService: MarketDataService;
+
+// Initialize retry handler for watchlist operations
+// Requirement 3.1, 3.4, 3.5: Implement retry logic with exponential backoff
+const retryHandler = new RetryHandler({
+  maxAttempts: 3,
+  initialDelay: 100,
+  maxDelay: 2000,
+  backoffMultiplier: 2
+});
 
 // Initialize market data service
 try {
@@ -42,50 +55,64 @@ const validateAddToWatchlist = [
 /**
  * GET /api/watchlist/:userId
  * Retrieve user's complete watchlist with current market data, sorting, and filtering
- * Requirement 9.2: Cache portfolio calculations for 30 seconds
+ * Requirements:
+ * - 2.1: Payload validation
+ * - 3.1: Retry logic with exponential backoff
+ * - 6.2: Rate limiting (100 req/min per user)
+ * - 9.2: Cache watchlist data for 30 seconds
  */
 router.get('/:userId',
-  watchlistLimiter,
+  watchlistLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   sanitizeInput,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const requestedUserId = req.params.userId;
-      const authenticatedUserId = req.user!.userId;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const requestedUserId = req.params.userId;
+    const authenticatedUserId = req.user!.userId;
 
-      // Ensure users can only access their own watchlist
-      if (requestedUserId !== authenticatedUserId) {
-        res.status(403).json({
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'You can only access your own watchlist',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
+    // Ensure users can only access their own watchlist
+    if (requestedUserId !== authenticatedUserId) {
+      res.status(403).json({
+        error: {
+          code: 'UNAUTHORIZED_ACCESS',
+          message: 'You can only access your own watchlist',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
 
-      // Parse query parameters for sorting and filtering
-      const {
-        sortBy = 'addedAt',
-        sortOrder = 'desc',
-        filterBy,
-        filterValue,
-        alertsOnly = 'false',
-        gainersOnly = 'false',
-        losersOnly = 'false'
-      } = req.query;
+    // Get timeout handler
+    const timeoutHandler = getTimeoutHandler(req);
 
-      // Create cache key based on query parameters
-      const queryKey = JSON.stringify({ sortBy, sortOrder, filterBy, filterValue, alertsOnly, gainersOnly, losersOnly });
+    // Parse query parameters for sorting and filtering
+    const {
+      sortBy = 'addedAt',
+      sortOrder = 'desc',
+      filterBy,
+      filterValue,
+      alertsOnly = 'false',
+      gainersOnly = 'false',
+      losersOnly = 'false'
+    } = req.query;
 
-      // Use CacheManager with stale-while-revalidate pattern
-      // Requirement 9.2: 30s TTL for watchlist data
-      const watchlistData = await watchlistCache.get(
-        `user:${requestedUserId}:list:${queryKey}`,
-        async () => {
-          // Get user's watchlist
-          const watchlistItems = await watchlistRepository.findByUserId(requestedUserId);
+    // Create cache key based on query parameters
+    const queryKey = JSON.stringify({ sortBy, sortOrder, filterBy, filterValue, alertsOnly, gainersOnly, losersOnly });
+
+    // Use CacheManager with stale-while-revalidate pattern
+    // Requirement 9.2: 30s TTL for watchlist data
+    const watchlistData = await watchlistCache.get(
+      `user:${requestedUserId}:list:${queryKey}`,
+      async () => {
+        // Check timeout before expensive operations
+        if (timeoutHandler?.checkTimeout()) {
+          throw new Error('Timeout approaching, returning cached data');
+        }
+
+        // Requirement 3.1: Get user's watchlist with retry logic
+        const watchlistItems = await retryHandler.executeWithRetry(
+          () => watchlistRepository.findByUserId(requestedUserId),
+          isRetryableError
+        );
           
           if (watchlistItems.length === 0) {
             return {
@@ -105,7 +132,16 @@ router.get('/:userId',
           
           if (marketDataService) {
             try {
-              const quotes = await marketDataService.getBatchQuotes(symbols);
+              // Check timeout before fetching market data
+              if (timeoutHandler?.isApproachingTimeout()) {
+                throw new Error('Timeout approaching, skipping market data fetch');
+              }
+
+              // Requirement 3.1: Fetch market data with retry logic
+              const quotes = await retryHandler.executeWithRetry(
+                () => marketDataService.getBatchQuotes(symbols),
+                isRetryableError
+              );
               const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
               
               // Update watchlist items with current market data
@@ -237,26 +273,24 @@ router.get('/:userId',
         { ttl: 30, staleWhileRevalidate: 15 }
       );
 
-      // Requirement 9.5: Set appropriate cache-control headers
-      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
+    // Requirement 9.5: Set appropriate cache-control headers
+    res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
-      res.json({
-        message: 'Watchlist retrieved successfully',
-        data: watchlistData,
-        timestamp: new Date()
-      });
-
-    } catch (error) {
-      console.error('Error retrieving watchlist:', error);
-      res.status(500).json({
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to retrieve watchlist',
-          timestamp: new Date()
-        }
-      });
+    // Requirement 2.1: Validate response payload size
+    const validator = new PayloadValidator();
+    const responseData = {
+      message: 'Watchlist retrieved successfully',
+      data: watchlistData,
+      timestamp: new Date()
+    };
+    
+    const validationResult = validator.validateResponse(responseData);
+    if (!validationResult.valid) {
+      console.warn('Response payload too large for watchlist');
     }
-  }
+
+    res.json(responseData);
+  })
 );
 
 /**

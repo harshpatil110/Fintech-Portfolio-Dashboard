@@ -8,17 +8,23 @@ import { getTimeoutHandler } from '../middleware/timeoutHandler';
 import { getRetryStats } from '../middleware/retryMiddleware';
 import { marketDataCache } from '../utils/cacheManager';
 import { asyncHandler, ValidationError } from '../utils/errorHandler';
+import { marketDataLimiter } from '../middleware/rateLimiter';
 
 /**
- * NOTE: Timeout handling is automatically applied via global middleware in server.ts
+ * Market Data API Routes
  * 
+ * Requirements implemented:
+ * - 1.3: Timeout handling for external API (6s limit)
+ * - 5.1: Circuit breaker for external market data API
+ * - 6.3: Rate limiting (300 req/min per user)
+ * - 9.1: Cache market data responses for 60 seconds
+ * 
+ * NOTE: Timeout handling is automatically applied via global middleware in server.ts
  * Market data routes have a 6-second timeout configured (see ENDPOINT_TIMEOUT_CONFIGS)
  * This shorter timeout is appropriate for external API calls that should respond quickly.
  * 
- * External API calls should use the timeout handler's wrapWithTimeout method to
- * automatically fall back to cached data when timeouts occur.
- * 
- * See backend/src/middleware/TIMEOUT_USAGE_EXAMPLES.md for detailed examples
+ * Circuit breaker is implemented in MarketDataService to prevent cascading failures.
+ * When circuit is open, cached data is returned automatically.
  */
 
 const router = Router();
@@ -72,8 +78,9 @@ const handleValidationErrors = (req: Request, res: Response, next: Function) => 
 };
 
 // Get current stock quote
-// Requirement 9.1: Cache market data responses for 60 seconds
+// Requirements: 1.3, 5.1, 6.3, 9.1
 router.get('/quote/:symbol', 
+  marketDataLimiter, // Requirement 6.3: Rate limiting (300 req/min)
   authenticateToken,
   validateSymbol,
   handleValidationErrors,
@@ -84,13 +91,24 @@ router.get('/quote/:symbol',
     }
     const upperSymbol = symbol.toUpperCase();
 
+    // Requirement 1.3: Get timeout handler for timeout protection
+    const timeoutHandler = getTimeoutHandler(req);
+
     // Use CacheManager with stale-while-revalidate pattern
     // Requirement 9.1: 60s TTL for market data
     // Requirement 9.3: Implement stale-while-revalidate caching pattern
+    // Requirement 5.1: Circuit breaker is implemented in marketDataService.getQuote()
     const quote = await marketDataCache.get(
       `quote:${upperSymbol}`,
       async () => {
+        // Requirement 1.3: Check timeout before external API call
+        if (timeoutHandler?.isApproachingTimeout()) {
+          throw new Error('Timeout approaching, using cached data');
+        }
+        
+        // Requirement 5.1: Circuit breaker wraps this call in MarketDataService
         const freshQuote = await marketDataService.getQuote(upperSymbol);
+        
         // Also cache in database for long-term storage
         await marketDataRepository.cacheQuote(freshQuote);
         return freshQuote;
@@ -111,8 +129,9 @@ router.get('/quote/:symbol',
 );
 
 // Get multiple stock quotes
-// Requirement 9.1: Cache market data responses for 60 seconds
+// Requirements: 1.3, 5.1, 6.3, 9.1
 router.post('/quotes',
+  marketDataLimiter, // Requirement 6.3: Rate limiting (300 req/min)
   authenticateToken,
   validateSymbols,
   handleValidationErrors,
@@ -120,12 +139,22 @@ router.post('/quotes',
       const { symbols } = req.body;
       const upperSymbols = symbols.map((s: string) => s.toUpperCase());
 
+      // Requirement 1.3: Get timeout handler
+      const timeoutHandler = getTimeoutHandler(req);
+
       // Fetch quotes for all symbols using CacheManager
       // Each symbol is cached individually with stale-while-revalidate
+      // Requirement 5.1: Circuit breaker is implemented in marketDataService
       const quotePromises = upperSymbols.map((symbol: string) =>
         marketDataCache.get(
           `quote:${symbol}`,
           async () => {
+            // Requirement 1.3: Check timeout before each API call
+            if (timeoutHandler?.isApproachingTimeout()) {
+              throw new Error('Timeout approaching');
+            }
+            
+            // Requirement 5.1: Circuit breaker wraps this call
             const quote = await marketDataService.getQuote(symbol);
             await marketDataRepository.cacheQuote(quote);
             return quote;
@@ -154,8 +183,9 @@ router.post('/quotes',
 );
 
 // Search for stocks
-// Requirement 9.1: Cache market data responses for 60 seconds
+// Requirements: 1.3, 5.1, 6.3, 9.1
 router.get('/search',
+  marketDataLimiter, // Requirement 6.3: Rate limiting (300 req/min)
   authenticateToken,
   validateSearchQuery,
   handleValidationErrors,
@@ -184,8 +214,9 @@ router.get('/search',
 );
 
 // Get historical data
-// Requirement 9.1: Cache market data responses for 60 seconds
+// Requirements: 1.3, 5.1, 6.3, 9.1
 router.get('/history/:symbol',
+  marketDataLimiter, // Requirement 6.3: Rate limiting (300 req/min)
   authenticateToken,
   validateSymbol,
   validatePeriod,
@@ -220,8 +251,9 @@ router.get('/history/:symbol',
 );
 
 // Validate stock symbol
-// Requirement 9.1: Cache market data responses for 60 seconds
+// Requirements: 1.3, 5.1, 6.3, 9.1
 router.get('/validate/:symbol',
+  marketDataLimiter, // Requirement 6.3: Rate limiting (300 req/min)
   authenticateToken,
   validateSymbol,
   handleValidationErrors,
@@ -255,8 +287,9 @@ router.get('/validate/:symbol',
 );
 
 // Get market status
-// Requirement 9.1: Cache market data responses for 60 seconds
+// Requirements: 1.3, 5.1, 6.3, 9.1
 router.get('/status',
+  marketDataLimiter, // Requirement 6.3: Rate limiting (300 req/min)
   authenticateToken,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {

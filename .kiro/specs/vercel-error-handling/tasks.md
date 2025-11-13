@@ -319,23 +319,30 @@ error messages
   - Configure monitoring service credentials
   - _Requirements: All requirements depend on proper configuration_
 
-- [ ] 13. Update existing API endpoints with error handling
+- [-] 13. Update existing API endpoints with error handling
 
-- [ ] 13.1 Update portfolio API endpoints
+
+
+- [x] 13.1 Update portfolio API endpoints
+
+
   - Add timeout handling to portfolio routes
   - Implement payload validation and pagination
   - Add caching and rate limiting
   - Wrap with error handler and retry logic
   - _Requirements: 1.1, 2.1, 3.1, 6.2, 9.2_
 
-- [ ] 13.2 Update market data API endpoints
+- [x] 13.2 Update market data API endpoints
+
+
   - Add circuit breaker to market data calls
   - Implement timeout handling for external API
   - Add caching with 60s TTL
   - Apply rate limiting (300 req/min)
   - _Requirements: 1.3, 5.1, 6.3, 9.1_
 
-- [ ] 13.3 Update watchlist API endpoints
+- [-] 13.3 Update watchlist API endpoints
+
   - Add payload validation for watchlist operations
   - Implement rate limiting
   - Add error handling and retry logic

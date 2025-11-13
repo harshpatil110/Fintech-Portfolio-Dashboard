@@ -23,6 +23,8 @@ import { portfolioLimiter, bulkOperationsLimiter } from '../middleware/rateLimit
 import { getTimeoutHandler } from '../middleware/timeoutHandler';
 import { PayloadValidator } from '../middleware/payloadValidator';
 import { portfolioCache, marketDataCache } from '../utils/cacheManager';
+import { asyncHandler, ErrorHandler } from '../utils/errorHandler';
+import { RetryHandler, isRetryableError } from '../utils/retryHandler';
 
 /**
  * NOTE: Timeout handling is automatically applied via global middleware in server.ts
@@ -43,6 +45,15 @@ const portfolioRepository = new PortfolioRepository();
 let marketDataService: MarketDataService;
 let performanceService: PerformanceService;
 
+// Initialize retry handler for portfolio operations
+// Requirement 3.1, 3.4, 3.5: Implement retry logic with exponential backoff
+const retryHandler = new RetryHandler({
+  maxAttempts: 3,
+  initialDelay: 100,
+  maxDelay: 2000,
+  backoffMultiplier: 2
+});
+
 // Initialize market data service
 try {
   marketDataService = createMarketDataService();
@@ -55,42 +66,57 @@ try {
  * GET /api/portfolio/:userId
  * Retrieve complete portfolio with current market data and calculations
  * Supports pagination via ?page=0&limit=100 query parameters
- * Requirement 9.2: Cache portfolio calculations for 30 seconds
+ * Requirements:
+ * - 1.1: Timeout handling (8s limit)
+ * - 2.1: Payload validation and pagination
+ * - 3.1: Retry logic with exponential backoff
+ * - 6.2: Rate limiting (100 req/min per user)
+ * - 9.2: Cache portfolio calculations for 30 seconds
  */
 router.get('/:userId',
-  portfolioLimiter,
+  portfolioLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   sanitizeInput,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const requestedUserId = req.params.userId;
-      const authenticatedUserId = req.user!.userId;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const requestedUserId = req.params.userId;
+    const authenticatedUserId = req.user!.userId;
 
-      // Ensure users can only access their own portfolio
-      if (requestedUserId !== authenticatedUserId) {
-        res.status(403).json({
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'You can only access your own portfolio',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
+    // Ensure users can only access their own portfolio
+    if (requestedUserId !== authenticatedUserId) {
+      res.status(403).json({
+        error: {
+          code: 'UNAUTHORIZED_ACCESS',
+          message: 'You can only access your own portfolio',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
 
-      // Get pagination parameters
-      const { page, limit } = PayloadValidator.getPaginationParams(req);
+    // Requirement 1.1: Get timeout handler for timeout protection
+    const timeoutHandler = getTimeoutHandler(req);
 
-      // Use CacheManager with stale-while-revalidate pattern
-      // Requirement 9.2: 30s TTL for portfolio data
-      // Requirement 9.3: Implement stale-while-revalidate caching pattern
-      const portfolioData = await portfolioCache.get(
-        `user:${requestedUserId}:portfolio:page:${page}:limit:${limit}`,
-        async () => {
-          // Get user's portfolios
-          const portfolios = await portfolioRepository.findByUserId(requestedUserId);
-          
-          if (portfolios.length === 0) {
+    // Requirement 2.1: Get pagination parameters with payload validation
+    const { page, limit } = PayloadValidator.getPaginationParams(req);
+
+    // Use CacheManager with stale-while-revalidate pattern
+    // Requirement 9.2: 30s TTL for portfolio data
+    // Requirement 9.3: Implement stale-while-revalidate caching pattern
+    const portfolioData = await portfolioCache.get(
+      `user:${requestedUserId}:portfolio:page:${page}:limit:${limit}`,
+      async () => {
+        // Requirement 1.1: Check timeout before expensive operations
+        if (timeoutHandler?.checkTimeout()) {
+          throw new Error('Timeout approaching, returning cached data');
+        }
+        
+        // Requirement 3.1: Get user's portfolios with retry logic
+        const portfolios = await retryHandler.executeWithRetry(
+          () => portfolioRepository.findByUserId(requestedUserId),
+          isRetryableError
+        );
+        
+        if (portfolios.length === 0) {
             return {
               portfolio: null,
               summary: {
@@ -162,7 +188,17 @@ router.get('/:userId',
           
           if (marketDataService) {
             try {
-              const quotes = await marketDataService.getBatchQuotes(symbols);
+              // Requirement 1.1: Wrap external API call with timeout protection
+              // Requirement 3.1: Add retry logic for market data fetching
+              const quotes = await retryHandler.executeWithRetry(
+                async () => {
+                  if (timeoutHandler?.isApproachingTimeout()) {
+                    throw new Error('Timeout approaching, skipping market data fetch');
+                  }
+                  return await marketDataService.getBatchQuotes(symbols);
+                },
+                isRetryableError
+              );
               const quoteMap = new Map(quotes.map(quote => [quote.symbol, quote]));
               
               // Update positions with current market data
@@ -240,26 +276,24 @@ router.get('/:userId',
         { ttl: 30, staleWhileRevalidate: 15 }
       );
 
-      // Requirement 9.5: Set appropriate cache-control headers
-      res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
+    // Requirement 9.5: Set appropriate cache-control headers
+    res.setHeader('Cache-Control', 'private, s-maxage=30, stale-while-revalidate=15');
 
-      res.json({
-        message: 'Portfolio retrieved successfully',
-        data: portfolioData,
-        timestamp: new Date()
-      });
-
-    } catch (error) {
-      console.error('Error retrieving portfolio:', error);
-      res.status(500).json({
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to retrieve portfolio',
-          timestamp: new Date()
-        }
-      });
+    // Requirement 2.1: Validate response payload size
+    const validator = new PayloadValidator();
+    const responseData = {
+      message: 'Portfolio retrieved successfully',
+      data: portfolioData,
+      timestamp: new Date()
+    };
+    
+    const validationResult = validator.validateResponse(responseData);
+    if (!validationResult.valid) {
+      console.warn('Response payload too large, data already paginated');
     }
-  }
+
+    res.json(responseData);
+  })
 );
 
 /**
@@ -322,271 +356,289 @@ const validateUpdatePosition = [
 /**
  * POST /api/portfolio/position
  * Add a new stock position to the user's portfolio
+ * Requirements:
+ * - 1.1: Timeout handling
+ * - 2.1: Payload validation
+ * - 3.1: Retry logic
+ * - 6.2: Rate limiting
+ * - 9.2: Cache invalidation
  */
 router.post('/position', 
-  portfolioLimiter,
+  portfolioLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   sanitizeInput,
   validateCreatePosition,
   handleValidationErrors,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const { symbol, companyName, quantity, averageCost, purchaseDate } = req.body;
-      const userId = req.user!.userId;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { symbol, companyName, quantity, averageCost, purchaseDate } = req.body;
+    const userId = req.user!.userId;
 
-      // Get or create user's default portfolio
-      let portfolios = await portfolioRepository.findByUserId(userId);
-      let portfolio;
+    // Requirement 1.1: Get timeout handler
+    const timeoutHandler = getTimeoutHandler(req);
 
-      if (portfolios.length === 0) {
-        // Create default portfolio if user doesn't have one
-        portfolio = await portfolioRepository.create(userId, { name: 'My Portfolio' });
-      } else {
-        // Use the first portfolio (default)
-        portfolio = portfolios[0];
-      }
+    // Requirement 3.1: Get or create user's default portfolio with retry logic
+    let portfolios = await retryHandler.executeWithRetry(
+      () => portfolioRepository.findByUserId(userId),
+      isRetryableError
+    );
+    let portfolio;
 
-      // Check if position with same symbol already exists in portfolio
-      const existingPositions = await portfolioRepository.findPositionsByPortfolioId(portfolio!.id);
-      const existingPosition = existingPositions.find(pos => pos.symbol.toUpperCase() === symbol.toUpperCase());
+    if (portfolios.length === 0) {
+      // Create default portfolio if user doesn't have one
+      portfolio = await retryHandler.executeWithRetry(
+        () => portfolioRepository.create(userId, { name: 'My Portfolio' }),
+        isRetryableError
+      );
+    } else {
+      // Use the first portfolio (default)
+      portfolio = portfolios[0];
+    }
 
-      if (existingPosition) {
-        res.status(409).json({
-          error: {
-            code: 'POSITION_EXISTS',
-            message: `Position for ${symbol.toUpperCase()} already exists in portfolio. Use PUT to update existing position.`,
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
+    // Check if position with same symbol already exists in portfolio
+    const existingPositions = await retryHandler.executeWithRetry(
+      () => portfolioRepository.findPositionsByPortfolioId(portfolio!.id),
+      isRetryableError
+    );
+    const existingPosition = existingPositions.find(pos => pos.symbol.toUpperCase() === symbol.toUpperCase());
 
-      // Add the new position
-      const newPosition = await portfolioRepository.addPosition(portfolio!.id, {
+    if (existingPosition) {
+      res.status(409).json({
+        error: {
+          code: 'POSITION_EXISTS',
+          message: `Position for ${symbol.toUpperCase()} already exists in portfolio. Use PUT to update existing position.`,
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Requirement 1.1: Check timeout before adding position
+    if (timeoutHandler?.checkTimeout()) {
+      res.status(504).json({
+        error: {
+          code: 'TIMEOUT_ERROR',
+          message: 'Request timeout while adding position',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Requirement 3.1: Add the new position with retry logic
+    const newPosition = await retryHandler.executeWithRetry(
+      () => portfolioRepository.addPosition(portfolio!.id, {
         symbol: symbol.toUpperCase(),
         companyName,
         quantity: parseFloat(quantity),
         averageCost: parseFloat(averageCost),
         purchaseDate
-      });
+      }),
+      isRetryableError
+    );
 
-      // Requirement 9.2: Implement cache invalidation on data updates
-      // Invalidate all cached portfolio data for this user
-      await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
+    // Requirement 9.2: Implement cache invalidation on data updates
+    // Invalidate all cached portfolio data for this user
+    await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
 
-      res.status(201).json({
-        message: 'Stock position added successfully',
-        data: newPosition,
-        timestamp: new Date()
-      });
-
-    } catch (error) {
-      console.error('Error adding stock position:', error);
-      res.status(500).json({
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to add stock position',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+    res.status(201).json({
+      message: 'Stock position added successfully',
+      data: newPosition,
+      timestamp: new Date()
+    });
+  })
 );
 
 /**
  * PUT /api/portfolio/position/:id
  * Update an existing stock position
+ * Requirements: 1.1, 2.1, 3.1, 6.2, 9.2
  */
 router.put('/position/:id',
-  portfolioLimiter,
+  portfolioLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   sanitizeInput,
   validateUpdatePosition,
   handleValidationErrors,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const positionId = req.params.id;
-      const userId = req.user!.userId;
-      const updateData = req.body;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const positionId = req.params.id;
+    const userId = req.user!.userId;
+    const updateData = req.body;
 
-      if (!positionId) {
-        res.status(400).json({
-          error: {
-            code: 'MISSING_POSITION_ID',
-            message: 'Position ID is required',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Verify the position exists and belongs to the user
-      const existingPosition = await portfolioRepository.findPositionById(positionId);
-      
-      if (!existingPosition) {
-        res.status(404).json({
-          error: {
-            code: 'POSITION_NOT_FOUND',
-            message: 'Stock position not found',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Verify the position belongs to the user's portfolio
-      const portfolio = await portfolioRepository.findById(existingPosition.portfolioId);
-      
-      if (!portfolio || portfolio.userId !== userId) {
-        res.status(403).json({
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'You do not have permission to update this position',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Update the position
-      const updateRequest: any = {};
-      if (updateData.quantity !== undefined) {
-        updateRequest.quantity = parseFloat(updateData.quantity);
-      }
-      if (updateData.averageCost !== undefined) {
-        updateRequest.averageCost = parseFloat(updateData.averageCost);
-      }
-      if (updateData.purchaseDate !== undefined) {
-        updateRequest.purchaseDate = updateData.purchaseDate;
-      }
-
-      const updatedPosition = await portfolioRepository.updatePosition(positionId, updateRequest);
-
-      if (!updatedPosition) {
-        res.status(500).json({
-          error: {
-            code: 'UPDATE_FAILED',
-            message: 'Failed to update stock position',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Requirement 9.2: Implement cache invalidation on data updates
-      // Invalidate all cached portfolio data for this user
-      await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
-
-      res.json({
-        message: 'Stock position updated successfully',
-        data: updatedPosition,
-        timestamp: new Date()
+    if (!positionId) {
+      res.status(400).json({
+        error: {
+          code: 'MISSING_POSITION_ID',
+          message: 'Position ID is required',
+          timestamp: new Date()
+        }
       });
+      return;
+    }
 
-    } catch (error) {
-      console.error('Error updating stock position:', error);
+    // Requirement 3.1: Verify the position exists and belongs to the user with retry logic
+    const existingPosition = await retryHandler.executeWithRetry(
+      () => portfolioRepository.findPositionById(positionId),
+      isRetryableError
+    );
+    
+    if (!existingPosition) {
+      res.status(404).json({
+        error: {
+          code: 'POSITION_NOT_FOUND',
+          message: 'Stock position not found',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Verify the position belongs to the user's portfolio
+    const portfolio = await retryHandler.executeWithRetry(
+      () => portfolioRepository.findById(existingPosition.portfolioId),
+      isRetryableError
+    );
+    
+    if (!portfolio || portfolio.userId !== userId) {
+      res.status(403).json({
+        error: {
+          code: 'UNAUTHORIZED_ACCESS',
+          message: 'You do not have permission to update this position',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Update the position
+    const updateRequest: any = {};
+    if (updateData.quantity !== undefined) {
+      updateRequest.quantity = parseFloat(updateData.quantity);
+    }
+    if (updateData.averageCost !== undefined) {
+      updateRequest.averageCost = parseFloat(updateData.averageCost);
+    }
+    if (updateData.purchaseDate !== undefined) {
+      updateRequest.purchaseDate = updateData.purchaseDate;
+    }
+
+    // Requirement 3.1: Update with retry logic
+    const updatedPosition = await retryHandler.executeWithRetry(
+      () => portfolioRepository.updatePosition(positionId, updateRequest),
+      isRetryableError
+    );
+
+    if (!updatedPosition) {
       res.status(500).json({
         error: {
-          code: 'INTERNAL_ERROR',
+          code: 'UPDATE_FAILED',
           message: 'Failed to update stock position',
           timestamp: new Date()
         }
       });
+      return;
     }
-  }
+
+    // Requirement 9.2: Implement cache invalidation on data updates
+    // Invalidate all cached portfolio data for this user
+    await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
+
+    res.json({
+      message: 'Stock position updated successfully',
+      data: updatedPosition,
+      timestamp: new Date()
+    });
+  })
 );
 
 /**
  * DELETE /api/portfolio/position/:id
  * Remove a stock position from the portfolio
+ * Requirements: 1.1, 3.1, 6.2, 9.2
  */
 router.delete('/position/:id',
-  portfolioLimiter,
+  portfolioLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   sanitizeInput,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const positionId = req.params.id;
-      const userId = req.user!.userId;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const positionId = req.params.id;
+    const userId = req.user!.userId;
 
-      if (!positionId) {
-        res.status(400).json({
-          error: {
-            code: 'MISSING_POSITION_ID',
-            message: 'Position ID is required',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Verify the position exists and belongs to the user
-      const existingPosition = await portfolioRepository.findPositionById(positionId);
-      
-      if (!existingPosition) {
-        res.status(404).json({
-          error: {
-            code: 'POSITION_NOT_FOUND',
-            message: 'Stock position not found',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Verify the position belongs to the user's portfolio
-      const portfolio = await portfolioRepository.findById(existingPosition.portfolioId);
-      
-      if (!portfolio || portfolio.userId !== userId) {
-        res.status(403).json({
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'You do not have permission to delete this position',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Remove the position
-      const deleted = await portfolioRepository.removePosition(positionId);
-
-      if (!deleted) {
-        res.status(500).json({
-          error: {
-            code: 'DELETE_FAILED',
-            message: 'Failed to delete stock position',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Requirement 9.2: Implement cache invalidation on data updates
-      // Invalidate all cached portfolio data for this user
-      await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
-
-      res.json({
-        message: 'Stock position removed successfully',
-        data: {
-          id: positionId,
-          symbol: existingPosition.symbol,
-          deletedAt: new Date()
-        },
-        timestamp: new Date()
-      });
-
-    } catch (error) {
-      console.error('Error removing stock position:', error);
-      res.status(500).json({
+    if (!positionId) {
+      res.status(400).json({
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to remove stock position',
+          code: 'MISSING_POSITION_ID',
+          message: 'Position ID is required',
           timestamp: new Date()
         }
       });
+      return;
     }
-  }
+
+    // Requirement 3.1: Verify the position exists and belongs to the user with retry logic
+    const existingPosition = await retryHandler.executeWithRetry(
+      () => portfolioRepository.findPositionById(positionId),
+      isRetryableError
+    );
+    
+    if (!existingPosition) {
+      res.status(404).json({
+        error: {
+          code: 'POSITION_NOT_FOUND',
+          message: 'Stock position not found',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Verify the position belongs to the user's portfolio
+    const portfolio = await retryHandler.executeWithRetry(
+      () => portfolioRepository.findById(existingPosition.portfolioId),
+      isRetryableError
+    );
+    
+    if (!portfolio || portfolio.userId !== userId) {
+      res.status(403).json({
+        error: {
+          code: 'UNAUTHORIZED_ACCESS',
+          message: 'You do not have permission to delete this position',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Requirement 3.1: Remove the position with retry logic
+    const deleted = await retryHandler.executeWithRetry(
+      () => portfolioRepository.removePosition(positionId),
+      isRetryableError
+    );
+
+    if (!deleted) {
+      res.status(500).json({
+        error: {
+          code: 'DELETE_FAILED',
+          message: 'Failed to delete stock position',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Requirement 9.2: Implement cache invalidation on data updates
+    // Invalidate all cached portfolio data for this user
+    await portfolioCache.invalidatePattern(`user:${userId}:portfolio:*`);
+
+    res.json({
+      message: 'Stock position removed successfully',
+      data: {
+        id: positionId,
+        symbol: existingPosition.symbol,
+        deletedAt: new Date()
+      },
+      timestamp: new Date()
+    });
+  })
 );
 
 /**
