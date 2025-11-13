@@ -296,182 +296,160 @@ router.get('/:userId',
 /**
  * POST /api/watchlist
  * Add a stock to the user's watchlist
+ * Requirements: 2.1, 3.1, 6.2, 9.2
  */
 router.post('/', 
-  watchlistLimiter,
+  watchlistLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   sanitizeInput,
   validateAddToWatchlist,
   handleValidationErrors,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const { symbol, companyName, alertPrice } = req.body;
-      const userId = req.user!.userId;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { symbol, companyName, alertPrice } = req.body;
+    const userId = req.user!.userId;
 
-      // Validate stock symbol with market data service if available
-      if (marketDataService) {
-        try {
-          const isValid = await marketDataService.validateSymbol(symbol);
-          if (!isValid) {
-            res.status(400).json({
-              error: {
-                code: 'INVALID_SYMBOL',
-                message: `Stock symbol ${symbol.toUpperCase()} is not valid or not found`,
-                timestamp: new Date()
-              }
-            });
-            return;
-          }
-        } catch (validationError) {
-          console.error('Symbol validation failed:', validationError);
-          // Continue without validation if market data service is unavailable
+    // Requirement 2.1: Payload validation is handled by validateAddToWatchlist middleware
+
+    // Validate stock symbol with market data service if available
+    if (marketDataService) {
+      try {
+        // Requirement 3.1: Validate symbol with retry logic
+        const isValid = await retryHandler.executeWithRetry(
+          () => marketDataService.validateSymbol(symbol),
+          isRetryableError
+        );
+        
+        if (!isValid) {
+          res.status(400).json({
+            error: {
+              code: 'INVALID_SYMBOL',
+              message: `Stock symbol ${symbol.toUpperCase()} is not valid or not found`,
+              timestamp: new Date()
+            }
+          });
+          return;
         }
+      } catch (validationError) {
+        console.error('Symbol validation failed:', validationError);
+        // Continue without validation if market data service is unavailable
       }
+    }
 
-      // Add to watchlist
-      const watchlistItem = await watchlistRepository.add(userId, {
+    // Requirement 3.1: Add to watchlist with retry logic
+    const watchlistItem = await retryHandler.executeWithRetry(
+      () => watchlistRepository.add(userId, {
         symbol: symbol.toUpperCase(),
         companyName,
         alertPrice: alertPrice ? parseFloat(alertPrice) : undefined
-      });
-
-      // Requirement 9.2: Implement cache invalidation on data updates
-      // Invalidate all cached watchlist data for this user
-      await watchlistCache.invalidatePattern(`user:${userId}:*`);
-
-      res.status(201).json({
-        message: 'Stock added to watchlist successfully',
-        data: watchlistItem,
-        timestamp: new Date()
-      });
-
-    } catch (error) {
-      console.error('Error adding to watchlist:', error);
-      
-      if (error instanceof Error) {
-        if (error.message.includes('already in your watchlist')) {
-          res.status(409).json({
-            error: {
-              code: 'STOCK_ALREADY_IN_WATCHLIST',
-              message: error.message,
-              timestamp: new Date()
-            }
-          });
-          return;
+      }),
+      (error) => {
+        // Don't retry if it's a business logic error (already exists, limit exceeded)
+        if (error instanceof Error) {
+          if (error.message.includes('already in your watchlist') || 
+              error.message.includes('Watchlist limit')) {
+            return false;
+          }
         }
-        
-        if (error.message.includes('Watchlist limit')) {
-          res.status(400).json({
-            error: {
-              code: 'WATCHLIST_LIMIT_EXCEEDED',
-              message: error.message,
-              timestamp: new Date()
-            }
-          });
-          return;
-        }
+        return isRetryableError(error);
       }
+    );
 
-      res.status(500).json({
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to add stock to watchlist',
-          timestamp: new Date()
-        }
-      });
-    }
-  }
+    // Requirement 9.2: Implement cache invalidation on data updates
+    // Invalidate all cached watchlist data for this user
+    await watchlistCache.invalidatePattern(`user:${userId}:*`);
+
+    res.status(201).json({
+      message: 'Stock added to watchlist successfully',
+      data: watchlistItem,
+      timestamp: new Date()
+    });
+  })
 );
 
 /**
  * DELETE /api/watchlist/:userId/:symbol
  * Remove a stock from the user's watchlist
+ * Requirements: 3.1, 6.2, 9.2
  */
 router.delete('/:userId/:symbol',
-  watchlistLimiter,
+  watchlistLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   sanitizeInput,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const { userId: requestedUserId, symbol } = req.params;
-      const authenticatedUserId = req.user!.userId;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { userId: requestedUserId, symbol } = req.params;
+    const authenticatedUserId = req.user!.userId;
 
-      // Ensure users can only modify their own watchlist
-      if (requestedUserId !== authenticatedUserId) {
-        res.status(403).json({
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'You can only modify your own watchlist',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      if (!symbol) {
-        res.status(400).json({
-          error: {
-            code: 'MISSING_SYMBOL',
-            message: 'Stock symbol is required',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Check if the stock exists in the watchlist
-      const existingItem = await watchlistRepository.findByUserIdAndSymbol(requestedUserId, symbol);
-      
-      if (!existingItem) {
-        res.status(404).json({
-          error: {
-            code: 'STOCK_NOT_IN_WATCHLIST',
-            message: `Stock ${symbol.toUpperCase()} is not in your watchlist`,
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Remove from watchlist
-      const removed = await watchlistRepository.remove(requestedUserId, symbol);
-
-      if (!removed) {
-        res.status(500).json({
-          error: {
-            code: 'REMOVAL_FAILED',
-            message: 'Failed to remove stock from watchlist',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Requirement 9.2: Implement cache invalidation on data updates
-      // Invalidate all cached watchlist data for this user
-      await watchlistCache.invalidatePattern(`user:${requestedUserId}:*`);
-
-      res.json({
-        message: 'Stock removed from watchlist successfully',
-        data: {
-          symbol: symbol.toUpperCase(),
-          companyName: existingItem.companyName,
-          removedAt: new Date()
-        },
-        timestamp: new Date()
+    // Ensure users can only modify their own watchlist
+    if (requestedUserId !== authenticatedUserId) {
+      res.status(403).json({
+        error: {
+          code: 'UNAUTHORIZED_ACCESS',
+          message: 'You can only modify your own watchlist',
+          timestamp: new Date()
+        }
       });
+      return;
+    }
 
-    } catch (error) {
-      console.error('Error removing from watchlist:', error);
+    if (!symbol) {
+      res.status(400).json({
+        error: {
+          code: 'MISSING_SYMBOL',
+          message: 'Stock symbol is required',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Requirement 3.1: Check if the stock exists in the watchlist with retry logic
+    const existingItem = await retryHandler.executeWithRetry(
+      () => watchlistRepository.findByUserIdAndSymbol(requestedUserId, symbol),
+      isRetryableError
+    );
+    
+    if (!existingItem) {
+      res.status(404).json({
+        error: {
+          code: 'STOCK_NOT_IN_WATCHLIST',
+          message: `Stock ${symbol.toUpperCase()} is not in your watchlist`,
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
+
+    // Requirement 3.1: Remove from watchlist with retry logic
+    const removed = await retryHandler.executeWithRetry(
+      () => watchlistRepository.remove(requestedUserId, symbol),
+      isRetryableError
+    );
+
+    if (!removed) {
       res.status(500).json({
         error: {
-          code: 'INTERNAL_ERROR',
+          code: 'REMOVAL_FAILED',
           message: 'Failed to remove stock from watchlist',
           timestamp: new Date()
         }
       });
+      return;
     }
-  }
+
+    // Requirement 9.2: Implement cache invalidation on data updates
+    // Invalidate all cached watchlist data for this user
+    await watchlistCache.invalidatePattern(`user:${requestedUserId}:*`);
+
+    res.json({
+      message: 'Stock removed from watchlist successfully',
+      data: {
+        symbol: symbol.toUpperCase(),
+        companyName: existingItem.companyName,
+        removedAt: new Date()
+      },
+      timestamp: new Date()
+    });
+  })
 );
 
 /**
@@ -553,8 +531,10 @@ router.delete('/:userId',
 /**
  * PUT /api/watchlist/:userId/:symbol
  * Update alert price for a stock in the watchlist
+ * Requirements: 2.1, 3.1, 6.2, 9.2
  */
 router.put('/:userId/:symbol',
+  watchlistLimiter, // Requirement 6.2: Rate limiting
   authenticateToken,
   [
     body('alertPrice')
@@ -563,86 +543,80 @@ router.put('/:userId/:symbol',
       .withMessage('Alert price must be a positive number greater than 0')
   ],
   handleValidationErrors,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const { userId: requestedUserId, symbol } = req.params;
-      const { alertPrice } = req.body;
-      const authenticatedUserId = req.user!.userId;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { userId: requestedUserId, symbol } = req.params;
+    const { alertPrice } = req.body;
+    const authenticatedUserId = req.user!.userId;
 
-      // Ensure users can only modify their own watchlist
-      if (requestedUserId !== authenticatedUserId) {
-        res.status(403).json({
-          error: {
-            code: 'UNAUTHORIZED_ACCESS',
-            message: 'You can only modify your own watchlist',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
+    // Ensure users can only modify their own watchlist
+    if (requestedUserId !== authenticatedUserId) {
+      res.status(403).json({
+        error: {
+          code: 'UNAUTHORIZED_ACCESS',
+          message: 'You can only modify your own watchlist',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
 
-      if (!symbol) {
-        res.status(400).json({
-          error: {
-            code: 'MISSING_SYMBOL',
-            message: 'Stock symbol is required',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
+    if (!symbol) {
+      res.status(400).json({
+        error: {
+          code: 'MISSING_SYMBOL',
+          message: 'Stock symbol is required',
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
 
-      // Check if the stock exists in the watchlist
-      const existingItem = await watchlistRepository.findByUserIdAndSymbol(requestedUserId, symbol);
-      
-      if (!existingItem) {
-        res.status(404).json({
-          error: {
-            code: 'STOCK_NOT_IN_WATCHLIST',
-            message: `Stock ${symbol.toUpperCase()} is not in your watchlist`,
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
+    // Requirement 3.1: Check if the stock exists in the watchlist with retry logic
+    const existingItem = await retryHandler.executeWithRetry(
+      () => watchlistRepository.findByUserIdAndSymbol(requestedUserId, symbol),
+      isRetryableError
+    );
+    
+    if (!existingItem) {
+      res.status(404).json({
+        error: {
+          code: 'STOCK_NOT_IN_WATCHLIST',
+          message: `Stock ${symbol.toUpperCase()} is not in your watchlist`,
+          timestamp: new Date()
+        }
+      });
+      return;
+    }
 
-      // Update the watchlist item
-      const updatedItem = await watchlistRepository.update(requestedUserId, symbol, {
+    // Requirement 3.1: Update the watchlist item with retry logic
+    const updatedItem = await retryHandler.executeWithRetry(
+      () => watchlistRepository.update(requestedUserId, symbol, {
         alertPrice: alertPrice ? parseFloat(alertPrice) : undefined
-      });
+      }),
+      isRetryableError
+    );
 
-      if (!updatedItem) {
-        res.status(500).json({
-          error: {
-            code: 'UPDATE_FAILED',
-            message: 'Failed to update watchlist item',
-            timestamp: new Date()
-          }
-        });
-        return;
-      }
-
-      // Requirement 9.2: Implement cache invalidation on data updates
-      // Invalidate all cached watchlist data for this user
-      await watchlistCache.invalidatePattern(`user:${requestedUserId}:*`);
-
-      res.json({
-        message: 'Watchlist item updated successfully',
-        data: updatedItem,
-        timestamp: new Date()
-      });
-
-    } catch (error) {
-      console.error('Error updating watchlist item:', error);
+    if (!updatedItem) {
       res.status(500).json({
         error: {
-          code: 'INTERNAL_ERROR',
+          code: 'UPDATE_FAILED',
           message: 'Failed to update watchlist item',
           timestamp: new Date()
         }
       });
+      return;
     }
-  }
+
+    // Requirement 9.2: Implement cache invalidation on data updates
+    // Invalidate all cached watchlist data for this user
+    await watchlistCache.invalidatePattern(`user:${requestedUserId}:*`);
+
+    res.json({
+      message: 'Watchlist item updated successfully',
+      data: updatedItem,
+      timestamp: new Date()
+    });
+  })
 );
 
 /**
