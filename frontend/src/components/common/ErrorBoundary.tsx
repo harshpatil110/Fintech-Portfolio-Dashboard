@@ -1,6 +1,7 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
 import { Box, Button, Container, Typography, Paper } from '@mui/material';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import { reportErrorToBackend } from '../../utils/errorReporting';
 
 interface Props {
   children: ReactNode;
@@ -11,6 +12,7 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  errorInfo: ErrorInfo | null;
 }
 
 class ErrorBoundary extends Component<Props, State> {
@@ -19,10 +21,11 @@ class ErrorBoundary extends Component<Props, State> {
     this.state = {
       hasError: false,
       error: null,
+      errorInfo: null,
     };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return {
       hasError: true,
       error,
@@ -31,12 +34,31 @@ class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
+    
+    // Store error info in state
+    this.setState({ errorInfo });
+    
+    // Report error to backend
+    reportErrorToBackend({
+      error,
+      errorInfo,
+      context: {
+        componentStack: errorInfo.componentStack,
+        url: window.location.href,
+        userAgent: navigator.userAgent,
+      },
+    }).catch((reportError) => {
+      console.error('Failed to report error to backend:', reportError);
+    });
   }
 
   handleReset = (): void => {
-    this.setState({ hasError: false, error: null });
+    this.setState({ hasError: false, error: null, errorInfo: null });
     if (this.props.onReset) {
       this.props.onReset();
+    } else {
+      // Default reset behavior: reload the page
+      window.location.reload();
     }
   };
 
