@@ -415,7 +415,9 @@ error messages
 
 
 
-- [ ] 16.1 Write unit tests for error handling utilities
+- [-] 16.1 Write unit tests for error handling utilities
+
+
 
 
 
