@@ -157,24 +157,3 @@ export function addBreadcrumb(breadcrumb: SentryBreadcrumb): void {
 export function isSentryEnabled(): boolean {
   return sentryEnabled;
 }
-
-// Usage in server.ts:
-// import { initializeSentry, applySentryErrorHandler } from './integrations/sentry';
-// 
-// // Early in middleware chain
-// initializeSentry(app);
-// 
-// // After all routes, before other error handlers
-// applySentryErrorHandler(app);
-
-// Usage in ErrorMonitoringService:
-// import { captureException } from '../integrations/sentry';
-// 
-// private sendToSentry(event: ErrorEvent, error: any, req?: Request): void {
-//   captureException(error, {
-//     endpoint: event.endpoint,
-//     errorCode: event.errorCode,
-//     requestId: event.requestId,
-//     userId: event.userId
-//   });
-// }

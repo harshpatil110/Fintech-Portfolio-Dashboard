@@ -118,10 +118,28 @@ ERROR_MONITORING_ENABLED=true        # Enable error monitoring
 ### Error Rate Alerting
 
 ```bash
-ERROR_RATE_THRESHOLD=10              # Alert when error rate exceeds 10%
+ERROR_RATE_THRESHOLD=10              # Alert when error rate exceeds 10 errors/min
 ERROR_RATE_WINDOW_MS=60000           # Calculate error rate over 60s window
-ENABLE_ERROR_ALERTS=true             # Enable alerting
+ENABLE_ERROR_ALERTS=true             # Enable error rate alerting
 ALERT_COOLDOWN_MS=300000             # Wait 5 minutes between alerts
+ALERT_CHECK_INTERVAL_MS=30000        # Check alert rules every 30s
+```
+
+### Alert Rule Configuration
+
+```bash
+# Enable/disable specific alert types
+ENABLE_CIRCUIT_BREAKER_ALERTS=true   # Alert on circuit breaker state changes
+ENABLE_TIMEOUT_ALERTS=true           # Alert on timeout spikes
+ENABLE_RATE_LIMIT_ALERTS=true        # Alert on rate limit violations
+ENABLE_PERFORMANCE_ALERTS=true       # Alert on high response times
+ENABLE_SUCCESS_RATE_ALERTS=true      # Alert on low success rates
+
+# Alert thresholds
+HIGH_RESPONSE_TIME_THRESHOLD=2000    # Alert when P95 exceeds 2000ms
+TIMEOUT_RATE_THRESHOLD=5             # Alert when timeout rate exceeds 5%
+RATE_LIMIT_BLOCK_THRESHOLD=10        # Alert when block rate exceeds 10%
+SUCCESS_RATE_THRESHOLD=95            # Alert when success rate below 95%
 ```
 
 ### External Monitoring Services (Optional)
@@ -144,14 +162,34 @@ SENTRY_TRACES_SAMPLE_RATE=0.1        # Sample 10% of transactions
 
 Get from: Sentry Dashboard → Project Settings → Client Keys (DSN)
 
-#### Alert Webhooks
-
+To install Sentry:
 ```bash
-ALERT_WEBHOOK_URL=                   # Slack/Discord webhook URL
+npm install @sentry/node
 ```
 
-**Slack:** Create incoming webhook in Slack workspace settings
-**Discord:** Create webhook in Discord channel settings
+#### Alert Channels
+
+```bash
+# Webhook (generic)
+ALERT_WEBHOOK_URL=                   # Generic webhook URL for alerts
+
+# Slack
+SLACK_WEBHOOK_URL=                   # Slack incoming webhook URL
+```
+
+**Slack Setup:**
+1. Go to Slack workspace settings
+2. Create an incoming webhook
+3. Copy webhook URL to `SLACK_WEBHOOK_URL`
+
+**Discord Setup:**
+1. Go to Discord channel settings
+2. Create webhook
+3. Copy webhook URL to `ALERT_WEBHOOK_URL`
+
+**Custom Webhook:**
+- Alerts are sent as JSON POST requests
+- See `backend/MONITORING_AND_ALERTING.md` for payload format
 
 ## Edge Function Configuration
 

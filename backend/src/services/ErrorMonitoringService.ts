@@ -293,51 +293,45 @@ export class ErrorMonitoringService {
   /**
    * Send error to Vercel Analytics
    */
-  private sendToVercelAnalytics(
+  private async sendToVercelAnalytics(
     event: ErrorEvent,
     error: any,
     req?: Request
-  ): void {
-    // Vercel Analytics integration
-    // In production, use @vercel/analytics package
-    if (process.env.VERCEL_ANALYTICS_ID) {
-      // Example integration - would use actual Vercel Analytics SDK
-      logger.debug('Sending error to Vercel Analytics', undefined, {
-        analyticsId: process.env.VERCEL_ANALYTICS_ID,
-        event: event.errorCode
+  ): Promise<void> {
+    try {
+      const { trackError } = await import('../integrations/vercel-analytics');
+      await trackError(event.errorCode, event.errorType, {
+        endpoint: event.endpoint,
+        statusCode: event.statusCode,
+        requestId: event.requestId,
+        userId: event.userId
       });
+    } catch (err) {
+      // Silently fail if Vercel Analytics is not available
+      logger.debug('Vercel Analytics not available', undefined, { error: err });
     }
   }
 
   /**
    * Send error to Sentry
    */
-  private sendToSentry(
+  private async sendToSentry(
     event: ErrorEvent,
     error: any,
     req?: Request
-  ): void {
-    // Sentry integration
-    // In production, use @sentry/node package
-    if (process.env.SENTRY_DSN) {
-      // Example integration - would use actual Sentry SDK
-      logger.debug('Sending error to Sentry', undefined, {
-        dsn: process.env.SENTRY_DSN ? '[CONFIGURED]' : '[NOT_CONFIGURED]',
-        errorId: event.requestId
+  ): Promise<void> {
+    try {
+      const { captureException } = await import('../integrations/sentry');
+      captureException(error, {
+        endpoint: event.endpoint,
+        errorCode: event.errorCode,
+        requestId: event.requestId,
+        userId: event.userId,
+        statusCode: event.statusCode
       });
-      
-      // Actual Sentry integration would look like:
-      // Sentry.captureException(error, {
-      //   tags: {
-      //     endpoint: event.endpoint,
-      //     errorCode: event.errorCode
-      //   },
-      //   user: event.userId ? { id: event.userId } : undefined,
-      //   extra: {
-      //     requestId: event.requestId,
-      //     statusCode: event.statusCode
-      //   }
-      // });
+    } catch (err) {
+      // Silently fail if Sentry is not available
+      logger.debug('Sentry not available', undefined, { error: err });
     }
   }
 

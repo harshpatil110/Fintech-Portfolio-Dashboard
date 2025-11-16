@@ -130,37 +130,3 @@ export async function trackApiCall(
 export function isVercelAnalyticsEnabled(): boolean {
   return analyticsEnabled;
 }
-
-// Usage in ErrorMonitoringService:
-// import { trackError } from '../integrations/vercel-analytics';
-// 
-// private async sendToVercelAnalytics(
-//   event: ErrorEvent,
-//   error: any,
-//   req?: Request
-// ): Promise<void> {
-//   await trackError(event.errorCode, event.errorType, {
-//     endpoint: event.endpoint,
-//     statusCode: event.statusCode,
-//     requestId: event.requestId
-//   });
-// }
-
-// Usage in request logger:
-// import { trackApiCall } from '../integrations/vercel-analytics';
-// 
-// export function requestLoggerMiddleware(req: Request, res: Response, next: NextFunction): void {
-//   const startTime = Date.now();
-//   
-//   const originalSend = res.send;
-//   res.send = function (data: any): Response {
-//     const duration = Date.now() - startTime;
-//     
-//     // Track in Vercel Analytics
-//     trackApiCall(req.path, req.method, res.statusCode, duration);
-//     
-//     return originalSend.call(this, data);
-//   };
-//   
-//   next();
-// }
