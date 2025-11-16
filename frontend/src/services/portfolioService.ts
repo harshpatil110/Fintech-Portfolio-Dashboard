@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { 
   PortfolioResponse,
   CreateStockPositionRequest,
@@ -9,136 +8,84 @@ import {
   BulkOperationRequest,
   BulkOperationResult
 } from '../types/portfolio';
-import { getAuthHeader } from '../utils/auth';
-import { getErrorMessage } from '../utils/errorMessages';
+import { createApiClient, apiCall } from '../utils/apiClient';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
-const portfolioApi = axios.create({
-  baseURL: `${API_BASE_URL}/portfolio`,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Request interceptor to add auth token
-portfolioApi.interceptors.request.use((config) => {
-  const authHeader = getAuthHeader();
-  if ('Authorization' in authHeader) {
-    config.headers.Authorization = authHeader.Authorization;
-  }
-  return config;
-});
-
-// Response interceptor for error handling
-portfolioApi.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Handle unauthorized - redirect to login
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
-  }
-);
+// Create API client with retry logic
+const portfolioApi = createApiClient(`${API_BASE_URL}/portfolio`);
 
 export const portfolioService = {
   async getPortfolio(userId: string): Promise<PortfolioResponse> {
-    try {
-      const response = await portfolioApi.get<PortfolioResponse>(`/${userId}`);
-      return response.data;
-    } catch (error) {
-      console.error('Failed to get portfolio:', error);
-      throw new Error(getErrorMessage(error));
-    }
+    return apiCall(() => portfolioApi.get<PortfolioResponse>(`/${userId}`));
   },
 
   async addPosition(position: CreateStockPositionRequest): Promise<StockPosition> {
-    try {
-      const response = await portfolioApi.post<{
+    const response = await apiCall(() =>
+      portfolioApi.post<{
         message: string;
         data: StockPosition;
         timestamp: string;
-      }>('/position', position);
-      return response.data.data;
-    } catch (error) {
-      console.error('Failed to add position:', error);
-      throw new Error(getErrorMessage(error));
-    }
+      }>('/position', position)
+    );
+    return response.data;
   },
 
   async updatePosition(positionId: string, updates: UpdateStockPositionRequest): Promise<StockPosition> {
-    try {
-      const response = await portfolioApi.put<{
+    const response = await apiCall(() =>
+      portfolioApi.put<{
         message: string;
         data: StockPosition;
         timestamp: string;
-      }>(`/position/${positionId}`, updates);
-      return response.data.data;
-    } catch (error) {
-      console.error('Failed to update position:', error);
-      throw new Error(getErrorMessage(error));
-    }
+      }>(`/position/${positionId}`, updates)
+    );
+    return response.data;
   },
 
   async removePosition(positionId: string): Promise<void> {
-    try {
-      await portfolioApi.delete(`/position/${positionId}`);
-    } catch (error) {
-      console.error('Failed to remove position:', error);
-      throw new Error(getErrorMessage(error));
-    }
+    await apiCall(() => portfolioApi.delete(`/position/${positionId}`));
   },
 
   async getTransactionHistory(userId: string, limit?: number): Promise<TransactionHistory[]> {
-    try {
-      const params = limit ? { limit: limit.toString() } : {};
-      const response = await portfolioApi.get<{
+    const params = limit ? { limit: limit.toString() } : {};
+    const response = await apiCall(() =>
+      portfolioApi.get<{
         message: string;
         data: TransactionHistory[];
         timestamp: string;
-      }>(`/${userId}/history`, { params });
-      return response.data.data;
-    } catch (error) {
-      console.error('Failed to get transaction history:', error);
-      throw new Error(getErrorMessage(error));
-    }
+      }>(`/${userId}/history`, { params })
+    );
+    return response.data;
   },
 
   async getFilteredPositions(userId: string, filters: PortfolioFilters): Promise<StockPosition[]> {
-    try {
-      const params: any = {};
-      if (filters.symbols) params.symbols = filters.symbols.join(',');
-      if (filters.minValue) params.minValue = filters.minValue.toString();
-      if (filters.maxValue) params.maxValue = filters.maxValue.toString();
-      if (filters.gainersOnly) params.gainersOnly = 'true';
-      if (filters.losersOnly) params.losersOnly = 'true';
-      if (filters.sortBy) params.sortBy = filters.sortBy;
-      if (filters.sortOrder) params.sortOrder = filters.sortOrder;
+    const params: any = {};
+    if (filters.symbols) params.symbols = filters.symbols.join(',');
+    if (filters.minValue) params.minValue = filters.minValue.toString();
+    if (filters.maxValue) params.maxValue = filters.maxValue.toString();
+    if (filters.gainersOnly) params.gainersOnly = 'true';
+    if (filters.losersOnly) params.losersOnly = 'true';
+    if (filters.sortBy) params.sortBy = filters.sortBy;
+    if (filters.sortOrder) params.sortOrder = filters.sortOrder;
 
-      const response = await portfolioApi.get<{
+    const response = await apiCall(() =>
+      portfolioApi.get<{
         message: string;
         data: StockPosition[];
         timestamp: string;
-      }>(`/${userId}/positions/filtered`, { params });
-      return response.data.data;
-    } catch (error) {
-      console.error('Failed to get filtered positions:', error);
-      throw new Error(getErrorMessage(error));
-    }
+      }>(`/${userId}/positions/filtered`, { params })
+    );
+    return response.data;
   },
 
   async performBulkOperation(operation: BulkOperationRequest): Promise<BulkOperationResult> {
-    try {
-      const response = await portfolioApi.post<{
+    const response = await apiCall(() =>
+      portfolioApi.post<{
         message: string;
         data: BulkOperationResult;
         timestamp: string;
-      }>('/bulk-operations', operation);
-      return response.data.data;
-    } catch (error) {
-      console.error('Failed to perform bulk operation:', error);
-      throw new Error(getErrorMessage(error));
-    }
+      }>('/bulk-operations', operation)
+    );
+    return response.data;
   }
 };
