@@ -61,8 +61,9 @@ describe('CircuitBreaker', () => {
       const successFn = async () => 'success';
       const fallback = () => 'fallback';
 
-      // Fail once
-      await breaker.execute(failFn, fallback);
+      // Fail once - circuit breaker catches and uses fallback
+      const result1 = await breaker.execute(failFn, fallback);
+      expect(result1).toBe('fallback');
       let state = breaker.getState();
       expect(state.failureCount).toBe(1);
 
@@ -84,7 +85,8 @@ describe('CircuitBreaker', () => {
       const fn = async () => { throw new Error('fail'); };
       const fallback = () => 'fallback';
 
-      await breaker.execute(fn, fallback);
+      const result = await breaker.execute(fn, fallback);
+      expect(result).toBe('fallback');
       const state = breaker.getState();
       expect(state.failureCount).toBe(1);
       expect(breaker.isClosed()).toBe(true);
@@ -101,9 +103,12 @@ describe('CircuitBreaker', () => {
       const fallback = () => 'fallback';
 
       // Fail 3 times to reach threshold
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      const result1 = await breaker.execute(fn, fallback);
+      expect(result1).toBe('fallback');
+      const result2 = await breaker.execute(fn, fallback);
+      expect(result2).toBe('fallback');
+      const result3 = await breaker.execute(fn, fallback);
+      expect(result3).toBe('fallback');
 
       expect(breaker.isOpen()).toBe(true);
       const state = breaker.getState();
@@ -121,8 +126,10 @@ describe('CircuitBreaker', () => {
       const fallback = () => 'fallback-value';
 
       // Open the circuit
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      const result1 = await breaker.execute(fn, fallback);
+      expect(result1).toBe('fallback-value');
+      const result2 = await breaker.execute(fn, fallback);
+      expect(result2).toBe('fallback-value');
 
       expect(breaker.isOpen()).toBe(true);
 
@@ -144,8 +151,10 @@ describe('CircuitBreaker', () => {
       const fallback = () => 'fallback';
 
       // Open the circuit
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      const result1 = await breaker.execute(fn, fallback);
+      expect(result1).toBe('fallback');
+      const result2 = await breaker.execute(fn, fallback);
+      expect(result2).toBe('fallback');
       expect(breaker.isOpen()).toBe(true);
 
       // Wait for reset timeout
@@ -171,8 +180,10 @@ describe('CircuitBreaker', () => {
       const fallback = () => 'fallback';
 
       // Open the circuit
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      const result1 = await breaker.execute(fn, fallback);
+      expect(result1).toBe('fallback');
+      const result2 = await breaker.execute(fn, fallback);
+      expect(result2).toBe('fallback');
       expect(breaker.isOpen()).toBe(true);
 
       // Wait for reset timeout
@@ -197,15 +208,18 @@ describe('CircuitBreaker', () => {
       const fallback = () => 'fallback';
 
       // Open the circuit
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      const result1 = await breaker.execute(fn, fallback);
+      expect(result1).toBe('fallback');
+      const result2 = await breaker.execute(fn, fallback);
+      expect(result2).toBe('fallback');
       expect(breaker.isOpen()).toBe(true);
 
       // Wait for reset timeout
       await sleep(150);
 
       // Failure in half-open should reopen circuit
-      await breaker.execute(fn, fallback);
+      const result3 = await breaker.execute(fn, fallback);
+      expect(result3).toBe('fallback');
       expect(breaker.isOpen()).toBe(true);
     });
   });
@@ -256,8 +270,10 @@ describe('CircuitBreaker', () => {
       const fallback = () => 'fallback';
 
       // Open the circuit
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      const result1 = await breaker.execute(fn, fallback);
+      expect(result1).toBe('fallback');
+      const result2 = await breaker.execute(fn, fallback);
+      expect(result2).toBe('fallback');
       expect(breaker.isOpen()).toBe(true);
 
       // Manual reset
@@ -284,8 +300,10 @@ describe('CircuitBreaker', () => {
       };
 
       // Open the circuit
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      const result1 = await breaker.execute(fn, fallback);
+      expect(result1).toBe('async-fallback');
+      const result2 = await breaker.execute(fn, fallback);
+      expect(result2).toBe('async-fallback');
 
       // Use async fallback
       const result = await breaker.execute(fn, fallback);
@@ -302,9 +320,9 @@ describe('CircuitBreaker', () => {
       const fn = async () => { throw new Error('fail'); };
       const fallback = () => { throw new Error('fallback-error'); };
 
-      // Open the circuit
-      await breaker.execute(fn, fallback);
-      await breaker.execute(fn, fallback);
+      // Open the circuit - fallback will fail
+      await expect(breaker.execute(fn, fallback)).rejects.toThrow('fallback-error');
+      await expect(breaker.execute(fn, fallback)).rejects.toThrow('fallback-error');
 
       // Fallback error should be thrown
       await expect(breaker.execute(fn, fallback)).rejects.toThrow('fallback-error');
