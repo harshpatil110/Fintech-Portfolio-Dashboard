@@ -210,8 +210,9 @@ describe('CircuitBreaker', () => {
       // Wait for reset timeout
       await sleep(150);
 
-      // Failure in half-open should throw error and reopen circuit
-      await expect(breaker.execute(fn, fallback)).rejects.toThrow('fail');
+      // Failure in half-open should reopen circuit and use fallback
+      const result3 = await breaker.execute(fn, fallback);
+      expect(result3).toBe('fallback');
       expect(breaker.isOpen()).toBe(true);
     });
   });
