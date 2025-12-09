@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from './useAuthHook';
 import { AuthTokenManager } from '../utils/auth';
 
 export interface WebSocketMessage {
