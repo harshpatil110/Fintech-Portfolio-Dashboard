@@ -43,7 +43,7 @@ class ErrorBoundary extends Component<Props, State> {
       error,
       errorInfo,
       context: {
-        componentStack: errorInfo.componentStack,
+        componentStack: errorInfo.componentStack || undefined,
         url: window.location.href,
         userAgent: navigator.userAgent,
       },

@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { 
   AuthResponse, 
   LoginCredentials, 
@@ -10,8 +9,6 @@ import {
 } from '../types/auth';
 import { AuthTokenManager } from '../utils/auth';
 import { noRetryApiClient, apiCall } from '../utils/apiClient';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
 // Use no-retry client for auth operations (they're not idempotent)
 const authApi = noRetryApiClient;

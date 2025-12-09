@@ -18,7 +18,7 @@ const performanceApi = axios.create({
 });
 
 // Request interceptor to add auth token
-performanceApi.interceptors.request.use((config) => {
+performanceApi.interceptors.request.use((config: any) => {
   const authHeader = getAuthHeader();
   if ('Authorization' in authHeader) {
     config.headers.Authorization = authHeader.Authorization;
@@ -28,8 +28,8 @@ performanceApi.interceptors.request.use((config) => {
 
 // Response interceptor for error handling
 performanceApi.interceptors.response.use(
-  (response) => response,
-  (error) => {
+  (response: any) => response,
+  (error: any) => {
     if (error.response?.status === 401) {
       window.location.href = '/login';
     }
@@ -54,7 +54,7 @@ export const performanceService = {
         params: { timeRange }
       });
       return response.data.data;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get portfolio performance:', error);
       if (axios.isAxiosError(error)) {
         const message = error.response?.data?.error?.message || 'Failed to get portfolio performance';
@@ -80,7 +80,7 @@ export const performanceService = {
         params: { timeRange }
       });
       return response.data.data;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get stock performance:', error);
       if (axios.isAxiosError(error)) {
         const message = error.response?.data?.error?.message || 'Failed to get stock performance';
@@ -107,7 +107,7 @@ export const performanceService = {
         params: { timeRange, indexSymbol }
       });
       return response.data.data;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get performance comparison:', error);
       if (axios.isAxiosError(error)) {
         const message = error.response?.data?.error?.message || 'Failed to get performance comparison';

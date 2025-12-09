@@ -33,7 +33,7 @@ export const reportErrorToBackend = async (report: ErrorReport): Promise<void> =
     const payload: ErrorReportPayload = {
       message: report.error.message,
       stack: report.error.stack,
-      componentStack: report.errorInfo?.componentStack,
+      componentStack: report.errorInfo?.componentStack || undefined,
       url: report.context?.url || window.location.href,
       userAgent: report.context?.userAgent || navigator.userAgent,
       timestamp: new Date().toISOString(),
