@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   Typography,
   Box,
@@ -17,24 +17,19 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import { useAuth } from '../../hooks/useAuthHook';
-import { watchlistService } from '../../services/watchlistService';
-import { WatchlistItem, WatchlistFilters as WatchlistFiltersType } from '../../types/watchlist';
+import { useMockWatchlist } from '../../hooks/useMockWatchlist';
 import { WatchlistItemCard } from './WatchlistItemCard';
 import { AddToWatchlist } from './AddToWatchlist';
 import { WatchlistFilters } from './WatchlistFilters';
+import { WatchlistFilters as WatchlistFiltersType } from '../../types/watchlist';
 import { BulkOperations } from './BulkOperations';
 import { AddPosition } from '../portfolio/AddPosition';
-import { useWebSocket } from '../../hooks/useWebSocket';
-import { marketService } from '../../services/marketService';
 
 export const Watchlist: React.FC = () => {
-  const { user } = useAuth();
-  const { isConnected, quotes, subscribe, unsubscribe, connectionState } = useWebSocket();
+  useAuth(); // Keep for context
+  const { items: watchlistItems, isLoading, error, addItem, removeItem, clearAll, updateAlert } = useMockWatchlist();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [bulkAddDialogOpen, setBulkAddDialogOpen] = useState(false);
@@ -49,114 +44,35 @@ export const Watchlist: React.FC = () => {
     sortOrder: 'desc'
   });
 
-  const loadWatchlist = useCallback(async () => {
-    if (!user) return;
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const response = await watchlistService.getWatchlist(user.id, filters);
-      setWatchlistItems(response.data.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load watchlist');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user, filters]);
-
-  useEffect(() => {
-    loadWatchlist();
-  }, [loadWatchlist]);
-
-  // Subscribe to WebSocket updates for watchlist symbols
-  useEffect(() => {
-    if (isConnected && watchlistItems.length > 0) {
-      const symbols = watchlistItems.map(item => item.symbol);
-      subscribe(symbols);
-
-      return () => {
-        unsubscribe(symbols);
-      };
-    }
-  }, [isConnected, watchlistItems, subscribe, unsubscribe]);
-
-  // Update watchlist items with real-time quotes
-  useEffect(() => {
-    if (quotes.size > 0) {
-      setWatchlistItems(prevItems =>
-        prevItems.map(item => {
-          const quote = quotes.get(item.symbol);
-          if (quote) {
-            return {
-              ...item,
-              currentPrice: quote.currentPrice,
-              change: quote.change,
-              changePercent: quote.changePercent
-            };
-          }
-          return item;
-        })
-      );
-    }
-  }, [quotes]);
-
   const handleAddToWatchlist = async (
     symbol: string,
     companyName: string,
     alertPrice?: number
   ) => {
-    try {
-      await watchlistService.addToWatchlist({ symbol, companyName, alertPrice });
-      setSuccessMessage(`${symbol} added to watchlist`);
-      await loadWatchlist();
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add to watchlist');
-      throw err;
-    }
+    addItem(symbol, companyName, alertPrice);
+    setSuccessMessage(`${symbol} added to watchlist`);
+    setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   const handleRemoveFromWatchlist = async (symbol: string) => {
-    if (!user) return;
-
-    try {
-      await watchlistService.removeFromWatchlist(user.id, symbol);
-      setSuccessMessage(`${symbol} removed from watchlist`);
-      await loadWatchlist();
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove from watchlist');
-    }
+    removeItem(symbol);
+    setSuccessMessage(`${symbol} removed from watchlist`);
+    setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   const handleClearWatchlist = async () => {
-    if (!user) return;
-
-    try {
-      await watchlistService.clearWatchlist(user.id);
-      setSuccessMessage('Watchlist cleared');
-      await loadWatchlist();
-      setClearDialogOpen(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to clear watchlist');
-    }
+    clearAll();
+    setSuccessMessage('Watchlist cleared');
+    setClearDialogOpen(false);
+    setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   const handleUpdateAlert = async (symbol: string, alertPrice?: number) => {
-    if (!user) return;
-
-    try {
-      await watchlistService.updateWatchlistItem(user.id, symbol, { alertPrice });
-      setSuccessMessage(
-        alertPrice ? `Alert set for ${symbol}` : `Alert removed for ${symbol}`
-      );
-      await loadWatchlist();
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update alert');
-    }
+    updateAlert(symbol, alertPrice);
+    setSuccessMessage(
+      alertPrice ? `Alert set for ${symbol}` : `Alert removed for ${symbol}`
+    );
+    setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   const handleAddToPortfolio = (symbol: string, companyName: string) => {
@@ -172,42 +88,11 @@ export const Watchlist: React.FC = () => {
   };
 
   const handleBulkAdd = async (symbols: string[]) => {
-    try {
-      // Get company names for symbols
-      const stocksToAdd = await Promise.all(
-        symbols.map(async (symbol) => {
-          try {
-            const quote = await marketService.getQuote(symbol);
-            return {
-              symbol,
-              companyName: quote.companyName
-            };
-          } catch {
-            return {
-              symbol,
-              companyName: symbol
-            };
-          }
-        })
-      );
-
-      const result = await watchlistService.bulkAddToWatchlist({ stocks: stocksToAdd });
-
-      const addedCount = result.summary.added;
-      const skippedCount = result.summary.skipped;
-      const errorCount = result.summary.errors;
-
-      let message = `Added ${addedCount} stock${addedCount !== 1 ? 's' : ''}`;
-      if (skippedCount > 0) message += `, skipped ${skippedCount}`;
-      if (errorCount > 0) message += `, ${errorCount} failed`;
-
-      setSuccessMessage(message);
-      await loadWatchlist();
-      setTimeout(() => setSuccessMessage(null), 5000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to bulk add stocks');
-      throw err;
-    }
+    symbols.forEach(symbol => {
+      addItem(symbol, symbol);
+    });
+    setSuccessMessage(`Added ${symbols.length} stock${symbols.length !== 1 ? 's' : ''}`);
+    setTimeout(() => setSuccessMessage(null), 5000);
   };
 
   if (isLoading) {
@@ -272,7 +157,7 @@ export const Watchlist: React.FC = () => {
       </Box>
 
       {error && (
-        <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
       )}
@@ -298,20 +183,8 @@ export const Watchlist: React.FC = () => {
             />
           )}
           <Chip
-            label={
-              connectionState === 'connected'
-                ? 'Live Updates'
-                : connectionState === 'connecting'
-                  ? 'Connecting...'
-                  : 'Offline'
-            }
-            color={
-              connectionState === 'connected'
-                ? 'success'
-                : connectionState === 'connecting'
-                  ? 'warning'
-                  : 'default'
-            }
+            label="Demo Mode"
+            color="info"
             size="small"
             variant="outlined"
           />
